@@ -20,7 +20,7 @@ from dqn.training import Trainer
 from dqn.qn import QN
 from dqn import HyperParameters
 
-from gym_agario.envs.AgarioFull import FeatureExtractor
+from features.extractors import FeatureExtractor
 
 def main():
     args = parse_args()

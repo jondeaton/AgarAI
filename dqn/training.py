@@ -73,7 +73,7 @@ class Trainer(object):
             ep_return = self.train_episode()
 
             episode_iterator.set_description("episode return: %.2f" % ep_return)
-            tensorboard.log_scalar("train/EpisodeReturns(MP Relative)", ep_return, self.episodes)
+            tensorboard.log_scalar("train/EpisodeReturns", ep_return, self.episodes)
             tensorboard.log_scalar("train/epsilon", self.epsilon, self.episodes)
             self.episodes += 1
 
@@ -90,17 +90,18 @@ class Trainer(object):
         log = dict()
 
         self.env.reset()
-        next_state = None
-        done = False
 
-        while not done:
-            state = next_state
+        next_state_fts = None
+        for i in range(1000):
+            state_fts = next_state_fts
 
-            action = self.choose_action(state)
+            action = self.choose_action(state_fts)
             next_state, reward, done, info = self.env.step(action)
-
+            next_state_fts = self.to_features(next_state)
             total_returns += reward
-            self.replay_buffer.push(state, action, next_state, reward)
+
+            if state_fts is not None and next_state_fts is not None:
+                self.replay_buffer.push(state_fts, action, next_state_fts, reward)
 
             # only train for a step if the replay buffer is full
             if self.replay_buffer.full:
@@ -111,6 +112,7 @@ class Trainer(object):
                     self.update_target_network()
 
             self.time_steps += 1
+            if done: break
 
         return total_returns
 
@@ -119,7 +121,7 @@ class Trainer(object):
             examples from the replay buffer.
         """
         batch = self.replay_buffer.sample_pop(self.hyperams.batch_size)
-        state_batch, action_batch, reward_batch, next_state_batch = self._to_tensor_batch(batch)
+        state_batch, action_batch, reward_batch, next_state_batch = self.to_tensor_batch(batch)
 
         Q_sa, _ = torch.max(self.q(state_batch), dim=1)
         target_Qspap, _ = torch.max(self.target_q(next_state_batch), dim=1)
@@ -145,16 +147,11 @@ class Trainer(object):
         self.target_q.load_state_dict(self.q.state_dict())
         self.num_target_updates += 1
 
-    def choose_action(self, state):
+    def choose_action(self, features):
         """ Chooses an action to take in state 's' using epsilon-greedy policy """
-        if state is None or torch.rand(1).item() <= self.epsilon:
+        if features is None or torch.rand(1).item() <= self.epsilon:
             index = torch.randint(self.num_actions, (1,)).item()
         else:
-            if self.extractor is not None:
-                features = self.extractor.extract(state)
-            else:
-                features = state
-
             s_tensor = torch.from_numpy(features).type(torch.FloatTensor).to(self.device)
             qa = self.q(s_tensor)
             index = torch.argmax(qa).item()
@@ -166,6 +163,31 @@ class Trainer(object):
         x = indices[0] / self.hyperams.action_shape[0]
         y = indices[1] / self.hyperams.action_shape[1]
         return x, y, indices[2]
+
+    def to_tensor_batch(self, transition_batch):
+        """ converts a batch (i.e. simple list) of Transition objects
+            into a tuple of tensors for the batch of states, actions,
+            rewards, and next states. Yes... this function is poorly written.
+        """
+        batch = Transition(*zip(*transition_batch))
+
+        def to_tensor(array_list):
+            """ converts a list of numpy arrays into a single tensor """
+            tensors = tuple(torch.from_numpy(np.array(a)) for a in array_list)
+            return torch.stack(tensors, dim=0).type(torch.FloatTensor).to(self.device)
+
+        feature_batch = to_tensor(batch.state)
+        action_batch = to_tensor(batch.action)
+        reward_batch = to_tensor(batch.reward)
+        next_feature_batch = to_tensor(batch.next_state)
+
+        return feature_batch, action_batch, reward_batch, next_feature_batch
+
+    def to_features(self, observation):
+        if self.extractor is None:
+            return observation
+        else:
+            return self.extractor(observation)
 
     @property
     def epsilon(self):

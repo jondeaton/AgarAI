@@ -22,7 +22,7 @@ class HyperParameters(object):
         self.action_shape = (64, 64, 3)
 
         # DQN parameters
-        self.batch_size = 4
+        self.batch_size = 16
         self.replay_buffer_capacity = 1000
         self.epsilon_base = 0.1
         self.epsilon_decay = 0.1
