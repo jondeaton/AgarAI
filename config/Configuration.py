@@ -21,7 +21,7 @@ class Configuration(object):
         self._config.read(self._config_file)
         c = self._config
 
-        self.dataset_path = os.path.expanduser(c["Data"]["path"])
+        self.path = os.path.expanduser(c["Data"]["path"])
 
     def override(self, settings):
         """

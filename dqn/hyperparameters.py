@@ -14,11 +14,19 @@ class HyperParameters(object):
         self.seed = 42
 
         self.gamma = 0.99
-        self.replay_buffer_capacity = 1000
 
         self.num_episodes = 100
 
         self.p_dropout = 0.05
+
+        self.action_shape = (64, 64, 3)
+
+        # DQN parameters
+        self.batch_size = 4
+        self.replay_buffer_capacity = 1000
+        self.epsilon_base = 0.1
+        self.epsilon_decay = 0.1
+        self.target_update_freq = 50
 
         # Adam Optimization parameters
         self.lr = 0.1

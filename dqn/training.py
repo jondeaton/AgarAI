@@ -14,8 +14,10 @@ from tqdm import tqdm
 import random
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 
 import os
 from log import tensorboard
@@ -25,7 +27,7 @@ logger = logging.getLogger('root')
 class Trainer(object):
     """ Trains a deep Q network (DQN) """
 
-    def __init__(self, env, q, target_q, hyperams: HyperParameters):
+    def __init__(self, env, q, target_q, hyperams: HyperParameters, extractor=None):
         self.env = env
         self.replay_buffer = ReplayBuffer(hyperams.replay_buffer_capacity)
 
@@ -35,6 +37,9 @@ class Trainer(object):
         self.target_q = target_q
 
         self.hyperams = hyperams
+        self.extractor = extractor
+
+        self.num_actions = int(np.prod(self.hyperams.action_shape))
 
         self.optimizer = optim.Adam(q.parameters(),
                                     lr=self.hyperams.lr,
@@ -85,9 +90,12 @@ class Trainer(object):
         log = dict()
 
         self.env.reset()
-        while not self.env.done():
+        next_state = None
+        done = False
 
-            state = self.env.get_state()
+        while not done:
+            state = next_state
+
             action = self.choose_action(state)
             next_state, reward, done, info = self.env.step(action)
 
@@ -103,9 +111,6 @@ class Trainer(object):
                     self.update_target_network()
 
             self.time_steps += 1
-            self.env.log_tensorboard(self.time_steps)
-            for k in log:
-                tensorboard.log_scalar(f"train/{k}", log[k], self.time_steps)
 
         return total_returns
 
@@ -140,14 +145,27 @@ class Trainer(object):
         self.target_q.load_state_dict(self.q.state_dict())
         self.num_target_updates += 1
 
-    def choose_action(self, s):
+    def choose_action(self, state):
         """ Chooses an action to take in state 's' using epsilon-greedy policy """
-        if torch.rand(1).item() <= self.epsilon:
-            return torch.randint(self.num_actions, (1,)).item()
+        if state is None or torch.rand(1).item() <= self.epsilon:
+            index = torch.randint(self.num_actions, (1,)).item()
         else:
-            s_tensor = torch.from_numpy(s).type(torch.FloatTensor).to(self.device)
+            if self.extractor is not None:
+                features = self.extractor.extract(state)
+            else:
+                features = state
+
+            s_tensor = torch.from_numpy(features).type(torch.FloatTensor).to(self.device)
             qa = self.q(s_tensor)
-            return torch.argmax(qa).item()
+            index = torch.argmax(qa).item()
+        return self.to_action(index)
+
+    def to_action(self, index):
+        """ converts a raw action index into an action shape """
+        indices = np.unravel_index(index, self.hyperams.action_shape)
+        x = indices[0] / self.hyperams.action_shape[0]
+        y = indices[1] / self.hyperams.action_shape[1]
+        return x, y, indices[2]
 
     @property
     def epsilon(self):

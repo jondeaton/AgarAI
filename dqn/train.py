@@ -11,14 +11,16 @@ logger = logging.getLogger()
 from config import config
 from log import tensorboard
 
+import numpy as np
 
 import gym
-
+import gym_agario
 
 from dqn.training import Trainer
 from dqn.qn import QN
 from dqn import HyperParameters
 
+from gym_agario.envs.AgarioFull import FeatureExtractor
 
 def main():
     args = parse_args()
@@ -40,16 +42,19 @@ def main():
     hyperams.save(hp_file)
 
     logger.info("Creating Agar.io gym environment...")
-    env = gym.make("agario-full")
+    env = gym.make("agario-full-v0")
     env.reset()
 
+    extractor = FeatureExtractor()
+    state_size = extractor.size
+    action_size = np.prod(hyperams.action_shape)
+
     logger.info("Creating Q network...")
-    # todo: q = QN(state_size, action_size, p_dropout=None, device=None)
-    # target_q = QN(state_size, action_size, p_dropout=None, device=None)
-    q = target_q = None
+    q = QN(state_size, action_size, p_dropout=hyperams.p_dropout, device=None)
+    target_q = QN(state_size, action_size, p_dropout=hyperams.p_dropout, device=None)
 
     logger.info("Training...")
-    trainer = Trainer(env, q, target_q, hyperams=hyperams)
+    trainer = Trainer(env, q, target_q, hyperams=hyperams, extractor=extractor)
     trainer.train(num_episodes=hyperams.num_episodes, training_dir=training_dir)
     logger.info("Exiting.")
 
@@ -79,7 +84,8 @@ def parse_args():
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")
-    output_options.add_argument("--name", help="Experiment or run name")
+    output_options.add_argument("--name", default="dqn",
+                                help="Experiment or run name")
 
     hyperams_options = parser.add_argument_group("HyperParameters")
     # note: make sure that the "dest" value is exactly the same as the variable name in "Hyperparameters"
