@@ -44,7 +44,6 @@ def main():
 
     logger.info("Creating Agar.io gym environment...")
     env = gym.make("agario-full-v0")
-    env.reset()
 
     extractor = FeatureExtractor()
     state_size = extractor.size
