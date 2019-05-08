@@ -6,8 +6,9 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 
 from dqn.qn import QN
 from dqn import HyperParameters
-from dqn.replay_buffer import ReplayBuffer
+
 from dqn.replay_buffer import Transition
+from dqn.replay_memory import ReplayMemory
 
 from datetime import datetime, timedelta
 from tqdm import tqdm
@@ -29,7 +30,7 @@ class Trainer(object):
 
     def __init__(self, env, q, target_q, hyperams: HyperParameters, extractor=None):
         self.env = env
-        self.replay_buffer = ReplayBuffer(hyperams.replay_buffer_capacity)
+        self.replay_memory = ReplayMemory(hyperams.replay_memory_capacity)
 
         self.device = q.device
 
@@ -65,7 +66,7 @@ class Trainer(object):
         checkpoint = training_dir is not None
         if checkpoint:
             checkpoint_dir = os.path.join(training_dir, "checkpoints")
-            os.makedirs(checkpoint_dir)
+            os.makedirs(checkpoint_dir, exist_ok=True)
 
         self.q.train()
         episode_iterator = tqdm(range(num_episodes), unit="Episode")
@@ -80,7 +81,6 @@ class Trainer(object):
             # save checkpoint
             should_checkpoint = checkpoint and (datetime.now() - self.last_save) > self.save_freq
             if should_checkpoint:
-                logger.info(f"Check-pointing DQN Network...")
                 torch.save(self.q, os.path.join(checkpoint_dir, "checkpoint"))
                 self.last_save = datetime.now()
 
@@ -101,10 +101,12 @@ class Trainer(object):
             total_returns += reward
 
             if state_fts is not None and next_state_fts is not None:
-                self.replay_buffer.push(state_fts, action, next_state_fts, reward)
+                transition = Transition(state_fts, action, next_state_fts, reward)
+                errors = self.get_errors([transition])
+                self.replay_memory.push(errors[0], transition)
 
             # only train for a step if the replay buffer is full
-            if self.replay_buffer.full:
+            if self.replay_memory.full():
                 self.train_step()
                 self.gradient_steps += 1
 
@@ -120,17 +122,33 @@ class Trainer(object):
         """ Runs a single step of parameter optimization using a batch of experience
             examples from the replay buffer.
         """
-        batch = self.replay_buffer.sample_pop(self.hyperams.batch_size)
+        batch, indexes, _ = self.replay_memory.sample(self.hyperams.batch_size)
         state_batch, action_batch, reward_batch, next_state_batch = self.to_tensor_batch(batch)
 
         Q_sa, _ = torch.max(self.q(state_batch), dim=1)
         target_Qspap, _ = torch.max(self.target_q(next_state_batch), dim=1)
 
         target = reward_batch + self.hyperams.gamma * target_Qspap
-
         loss = F.smooth_l1_loss(Q_sa, target)  # Hubert loss
         tensorboard.log_scalar("train/loss", float(loss), self.gradient_steps)
+
+        # update the new errors in the replay memory
+        errors = torch.abs(Q_sa - target).cpu().data.numpy()
+        for i in range(self.hyperams.batch_size):
+            self.replay_memory.update(indexes[i], errors[i])
+
         self.optimize_q(loss)
+
+    def get_errors(self, transition_batch: Transition):
+        tensor_batch = self.to_tensor_batch(transition_batch)
+        state_batch, action_batch, reward_batch, next_state_batch = tensor_batch
+
+        Q_sa, _ = torch.max(self.q(state_batch), dim=1)
+        target_Qspap, _ = torch.max(self.target_q(next_state_batch), dim=1)
+
+        target = reward_batch + self.hyperams.gamma * target_Qspap
+        errors = torch.abs(Q_sa - target)
+        return errors.cpu().data.numpy()
 
     def optimize_q(self, loss: torch.Tensor):
         """ Performs a single step of optimization to minimise the loss """

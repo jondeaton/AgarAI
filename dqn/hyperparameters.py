@@ -15,15 +15,15 @@ class HyperParameters(object):
 
         self.gamma = 0.99
 
-        self.num_episodes = 100
+        self.num_episodes = 1000
 
         self.p_dropout = 0.05
 
-        self.action_shape = (64, 64, 3)
+        self.action_shape = (8, 8, 1)
 
         # DQN parameters
         self.batch_size = 16
-        self.replay_buffer_capacity = 1000
+        self.replay_memory_capacity = 100000
         self.epsilon_base = 0.1
         self.epsilon_decay = 0.1
         self.target_update_freq = 50
