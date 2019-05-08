@@ -11,9 +11,9 @@ to start tensorboard during training
       
 # todo
 
+- Fix the experience replay buffer
 - Report information from the environment about what's happening (to tensorboard)
 - Refactor the code for converting game state into features (python and C++)
-- Fix the experience replay buffer
 - Try a very simple environment, make sure its doing expeted things
 - come up with better values to represent things that are absent
 

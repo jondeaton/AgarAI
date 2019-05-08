@@ -19,17 +19,17 @@ class HyperParameters(object):
 
         self.p_dropout = 0.05
 
-        self.action_shape = (64, 64, 3)
+        self.action_shape = (64, 64, 1)
 
         # DQN parameters
         self.batch_size = 16
-        self.replay_buffer_capacity = 1000
+        self.replay_memory_capacity = 2000
         self.epsilon_base = 0.1
         self.epsilon_decay = 0.1
         self.target_update_freq = 50
 
         # Adam Optimization parameters
-        self.lr = 0.1
+        self.lr = 0.01
         self.adam_betas = (0.9, 0.999)
         self.adam_eps = 1e-8
         self.grad_clip_norm = None

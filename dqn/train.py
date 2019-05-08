@@ -68,15 +68,11 @@ def get_training_dir(output_dir, name):
     :param name: name of this run
     :return: path to file of the form /path/to/output/name-X
     """
-
     base = os.path.join(output_dir, name)
-    if not os.path.exists(base):
-        return base
-
     i = 0
-    while os.path.exists(f"{base}-{i}"):
+    while os.path.exists("%s-%03d" % (base, i)):
         i += 1
-    return f"{base}-{i}"
+    return "%s-%03d" % (base, i)
 
 
 def parse_args():
@@ -91,7 +87,7 @@ def parse_args():
     hyperams_options = parser.add_argument_group("HyperParameters")
     # note: make sure that the "dest" value is exactly the same as the variable name in "Hyperparameters"
     # in order for over-riding to work correctly.
-    hyperams_options.add_argument("-epochs", "--epochs", dest="num_epochs", type=int,
+    hyperams_options.add_argument("-episodes", "--episodes", dest="num_episodes", type=int,
                                   help="Number of epochs to train")
 
     training_options = parser.add_argument_group("Training")

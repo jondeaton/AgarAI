@@ -37,3 +37,4 @@ class Tensorboard:
 
     def flush(self):
         self.writer.flush()
+
