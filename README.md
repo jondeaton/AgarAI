@@ -10,12 +10,7 @@ to start tensorboard during training
       
       
 # todo
-- Make the environment more flexible
-  - configurable:
-    - arena dimensionss
-    - number of food
-    - number of viruses
-    - number of bots of each type
+
 - Report information from the environment about what's happening (to tensorboard)
 - Refactor the code for converting game state into features (python and C++)
 - Fix the experience replay buffer
