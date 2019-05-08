@@ -80,7 +80,6 @@ class Trainer(object):
             # save checkpoint
             should_checkpoint = checkpoint and (datetime.now() - self.last_save) > self.save_freq
             if should_checkpoint:
-                logger.info(f"Check-pointing DQN Network...")
                 torch.save(self.q, os.path.join(checkpoint_dir, "checkpoint"))
                 self.last_save = datetime.now()
 
