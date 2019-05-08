@@ -133,7 +133,7 @@ class Trainer(object):
         tensorboard.log_scalar("train/loss", float(loss), self.gradient_steps)
 
         # update the new errors in the replay memory
-        errors = torch.abs(Q_sa - target).data.numpy()
+        errors = torch.abs(Q_sa - target).cpu().data.numpy()
         for i in range(self.hyperams.batch_size):
             self.replay_memory.update(indexes[i], errors[i])
 
@@ -148,7 +148,7 @@ class Trainer(object):
 
         target = reward_batch + self.hyperams.gamma * target_Qspap
         errors = torch.abs(Q_sa - target)
-        return errors.data.numpy()
+        return errors.cpu().data.numpy()
 
     def optimize_q(self, loss: torch.Tensor):
         """ Performs a single step of optimization to minimise the loss """
