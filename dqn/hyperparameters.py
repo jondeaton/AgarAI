@@ -15,7 +15,7 @@ class HyperParameters(object):
 
         self.gamma = 0.99
 
-        self.num_episodes = 100
+        self.num_episodes = 1000
 
         self.p_dropout = 0.05
 

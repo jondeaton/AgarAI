@@ -31,18 +31,23 @@ class FeatureExtractor:
         if loc is None: return None # no player position
 
         close_foods = self.sort_by_proximity(loc, observation.foods, n=self.nfood)
+        close_foods -= loc
         foods = np.zeros((self.nfood, 2))
         foods[:len(close_foods)] = close_foods
 
+
         close_viruses = self.sort_by_proximity(loc, observation.viruses, n=self.nvirus)
+        close_viruses -= loc
         viruses = np.zeros((self.nvirus, 2))
         viruses[:len(close_viruses)] = close_viruses
 
         close_pellets = self.sort_by_proximity(loc, observation.pellets, n=self.npellets)
+        close_pellets -= loc
         pellets = np.zeros((self.npellets, 2))
         pellets[:len(close_pellets)] = close_pellets
 
         largest_cells = self.largest_cells(agent, n=self.ncell)
+        largest_cells[:, (0, 1)] -= loc
         agent_cells = np.zeros((self.ncell, 5))
         agent_cells[:len(largest_cells)] = largest_cells
 
@@ -52,6 +57,7 @@ class FeatureExtractor:
         for player in closest_players:
             p = np.zeros((self.ncell, 5))
             player_cells = self.largest_cells(player, n=self.ncell)
+            player_cells[:, (0, 1)] -= loc
             p[:len(player_cells)] = player_cells
             feature_stacks.append(p)
 

@@ -17,10 +17,11 @@ import gym
 import gym_agario
 
 from dqn.training import Trainer
-from dqn.qn import QN
+from dqn.qn import QN, DQN
 from dqn import HyperParameters
 
 from features.extractors import FeatureExtractor
+import torch
 
 def main():
     args = parse_args()
@@ -50,8 +51,9 @@ def main():
     action_size = np.prod(hyperams.action_shape)
 
     logger.info("Creating Q network...")
-    q = QN(state_size, action_size, p_dropout=hyperams.p_dropout, device=None)
-    target_q = QN(state_size, action_size, p_dropout=hyperams.p_dropout, device=None)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    q = DQN(state_size, action_size, p_dropout=hyperams.p_dropout, device=device)
+    target_q = DQN(state_size, action_size, p_dropout=hyperams.p_dropout, device=device)
 
     logger.info("Training...")
     trainer = Trainer(env, q, target_q, hyperams=hyperams, extractor=extractor)
