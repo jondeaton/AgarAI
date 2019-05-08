@@ -19,11 +19,11 @@ class HyperParameters(object):
 
         self.p_dropout = 0.05
 
-        self.action_shape = (16, 16, 1)
+        self.action_shape = (8, 8, 1)
 
         # DQN parameters
-        self.batch_size = 4
-        self.replay_memory_capacity = 2000
+        self.batch_size = 16
+        self.replay_memory_capacity = 100000
         self.epsilon_base = 0.1
         self.epsilon_decay = 0.1
         self.target_update_freq = 50
