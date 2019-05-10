@@ -5,6 +5,7 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
 import json
+import math
 
 
 class HyperParameters(object):
@@ -29,13 +30,13 @@ class HyperParameters(object):
 
         self.batch_size = 32
         self.replay_memory_capacity = 100000
-        self.epsilon_base = 0.5
-        self.epsilon_end = 0.1
-        self.epsilon_decay = 0.1
+        self.epsilon_base = 0.4
+        self.epsilon_end = 0.05
+        self.epsilon_decay = math.log(2) / 500
         self.target_update_freq = 50
 
         # Adam Optimization parameters
-        self.lr = 0.001
+        self.lr = 0.05
         self.adam_betas = (0.9, 0.999)
         self.adam_eps = 1e-8
         self.grad_clip_norm = None
