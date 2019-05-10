@@ -22,14 +22,20 @@ class HyperParameters(object):
         self.action_shape = (8, 8, 1)
 
         # DQN parameters
-        self.batch_size = 16
+        self.double_dqn = True
+        self.dueling_dqn = False
+
+        self.layer_sizes = [32, 16, 16]
+
+        self.batch_size = 32
         self.replay_memory_capacity = 100000
-        self.epsilon_base = 0.1
+        self.epsilon_base = 0.5
+        self.epsilon_end = 0.1
         self.epsilon_decay = 0.1
         self.target_update_freq = 50
 
         # Adam Optimization parameters
-        self.lr = 0.1
+        self.lr = 0.001
         self.adam_betas = (0.9, 0.999)
         self.adam_eps = 1e-8
         self.grad_clip_norm = None

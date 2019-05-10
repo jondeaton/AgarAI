@@ -4,10 +4,8 @@ Date: 5/6/19
 Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
-from dqn.qn import QN
 from dqn import HyperParameters
 
-from dqn.replay_buffer import Transition
 from dqn.replay_memory import ReplayMemory
 
 from datetime import datetime, timedelta
@@ -24,6 +22,12 @@ import os
 from log import tensorboard
 import logging
 logger = logging.getLogger('root')
+
+from collections import namedtuple
+Transition = namedtuple('Transition',
+                        ('state', 'action', 'next_state', 'reward'))
+
+from typing import List, Tuple
 
 class Trainer(object):
     """ Trains a deep Q network (DQN) """
@@ -123,12 +127,12 @@ class Trainer(object):
             examples from the replay buffer.
         """
         batch, indexes, _ = self.replay_memory.sample(self.hyperams.batch_size)
-        state_batch, action_batch, reward_batch, next_state_batch = self.to_tensor_batch(batch)
+        sars_batches = self.to_tensor_batch(batch)
+        state_batch, action_batch, reward_batch, next_state_batch = sars_batches
 
         Q_sa, _ = torch.max(self.q(state_batch), dim=1)
-        target_Qspap, _ = torch.max(self.target_q(next_state_batch), dim=1)
+        target = self.get_target(sars_batches)
 
-        target = reward_batch + self.hyperams.gamma * target_Qspap
         loss = F.smooth_l1_loss(Q_sa, target)  # Hubert loss
         tensorboard.log_scalar("train/loss", float(loss), self.gradient_steps)
 
@@ -139,14 +143,28 @@ class Trainer(object):
 
         self.optimize_q(loss)
 
-    def get_errors(self, transition_batch: Transition):
-        tensor_batch = self.to_tensor_batch(transition_batch)
-        state_batch, action_batch, reward_batch, next_state_batch = tensor_batch
+    def get_target(self, sars_batches: Tuple):
+        state_batch, action_batch, reward_batch, next_state_batch = sars_batches
+
+        if self.hyperams.double_dqn:
+            # double DQN: choose action using online network
+            ap = torch.argmax(self.q(next_state_batch), dim=1)
+            # but use "stationary" target network to evaluate V(s')
+            Q_tgt = self.target_q(next_state_batch).take(ap)
+        else:
+            # vanilla DQN: just use target network maximization
+            Q_tgt, _ = torch.max(self.target_q(next_state_batch), dim=1)
+
+        target = reward_batch + self.hyperams.gamma * Q_tgt
+        return target
+
+    def get_errors(self, transition_batch: List[Transition]):
+        sars_batches = self.to_tensor_batch(transition_batch)
+        state_batch, action_batch, reward_batch, next_state_batch = sars_batches
 
         Q_sa, _ = torch.max(self.q(state_batch), dim=1)
-        target_Qspap, _ = torch.max(self.target_q(next_state_batch), dim=1)
+        target = self.get_target(sars_batches)
 
-        target = reward_batch + self.hyperams.gamma * target_Qspap
         errors = torch.abs(Q_sa - target)
         return errors.cpu().data.numpy()
 
@@ -210,7 +228,9 @@ class Trainer(object):
     @property
     def epsilon(self):
         """ The current value of 'epsilon' for the e-greedy training policy """
-        return self.hyperams.epsilon_base / pow(self.gradient_steps + 1, self.hyperams.epsilon_decay)
+        r = np.exp(- self.hyperams.epsilon_decay * self.gradient_steps)
+        diff = self.hyperams.epsilon_base - self.hyperams.epsilon_end
+        return self.hyperams.epsilon_end + r * diff
 
     def set_seed(self, seed):
         """ Sets random seeds for reproducibility """

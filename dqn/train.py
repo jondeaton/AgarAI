@@ -17,7 +17,7 @@ import gym
 import gym_agario
 
 from dqn.training import Trainer
-from dqn.qn import QN, DQN
+from dqn.qn import DQN, DuelingDQN
 from dqn import HyperParameters
 
 from features.extractors import FeatureExtractor
@@ -45,14 +45,18 @@ def main():
     logger.info("Creating Agar.io gym environment...")
     env = gym.make("agario-full-v0")
 
-    extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=1)
+    extractor = FeatureExtractor(num_pellet=10, num_virus=0, num_food=0, num_other=0, num_cell=1)
     state_size = extractor.size
     action_size = np.prod(hyperams.action_shape)
 
+
     logger.info("Creating Q network...")
+    network = DuelingDQN if hyperams.dueling_dqn else DQN
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    q = DQN(state_size, action_size, p_dropout=hyperams.p_dropout, device=device)
-    target_q = DQN(state_size, action_size, p_dropout=hyperams.p_dropout, device=device)
+    q = network(state_size, action_size, hyperams.layer_sizes,
+                p_dropout=hyperams.p_dropout, device=device)
+    target_q = network(state_size, action_size, hyperams.layer_sizes,
+                       p_dropout=hyperams.p_dropout, device=device)
 
     logger.info("Training...")
     trainer = Trainer(env, q, target_q, hyperams=hyperams, extractor=extractor)

@@ -6,14 +6,12 @@ to run DQN training
         
 to start tensorboard during training
 
-    tensorboard --logdir model_outputs/dqn
+    tensorboard --logdir model_outputs
       
       
 # todo
 
-- Fix the experience replay buffer
 - Report information from the environment about what's happening (to tensorboard)
-- Refactor the code for converting game state into features (python and C++)
-- Try a very simple environment, make sure its doing expeted things
-- come up with better values to represent things that are absent
+- Report estimated Q values to tensorboard
+
 
