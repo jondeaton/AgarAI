@@ -23,6 +23,7 @@ from dqn import HyperParameters
 from features.extractors import FeatureExtractor
 import torch
 
+
 def main():
     args = parse_args()
 
@@ -43,12 +44,18 @@ def main():
     hyperams.save(hp_file)
 
     logger.info("Creating Agar.io gym environment...")
-    env = gym.make("agario-full-v0")
+    env = gym.make("agario-full-v0", **{
+        'frames_per_step': 4,
+        'arena_size': 1000,
+        'num_pellets': 1000,
+        'num_viruses': 0,
+        'num_bots': 0,
+        'pellet_regen': True
+    })
 
     extractor = FeatureExtractor(num_pellet=10, num_virus=0, num_food=0, num_other=0, num_cell=1)
     state_size = extractor.size
     action_size = np.prod(hyperams.action_shape)
-
 
     logger.info("Creating Q network...")
     network = DuelingDQN if hyperams.dueling_dqn else DQN

@@ -13,27 +13,23 @@ class HyperParameters(object):
 
     def __init__(self):
         self.seed = 42
-
         self.gamma = 0.99
-
         self.num_episodes = 1000
-
         self.p_dropout = 0.05
-
         self.action_shape = (8, 8, 1)
 
         # DQN parameters
         self.double_dqn = True
-        self.dueling_dqn = False
+        self.dueling_dqn = True
 
-        self.layer_sizes = [32, 16, 16]
+        self.layer_sizes = [32, 16]
 
         self.batch_size = 32
         self.replay_memory_capacity = 100000
         self.epsilon_base = 0.4
         self.epsilon_end = 0.05
         self.epsilon_decay = math.log(2) / 500
-        self.target_update_freq = 50
+        self.target_update_freq = 500
 
         # Adam Optimization parameters
         self.lr = 0.05
