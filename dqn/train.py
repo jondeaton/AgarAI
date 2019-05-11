@@ -53,7 +53,7 @@ def main():
         'pellet_regen': True
     })
 
-    extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=0)
+    extractor = FeatureExtractor(num_pellet=10, num_virus=4, num_food=0, num_other=0, num_cell=2)
     state_size = extractor.size
     action_size = np.prod(hyperams.action_shape)
 
