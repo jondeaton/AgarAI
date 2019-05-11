@@ -28,7 +28,7 @@ class HyperParameters(object):
         self.replay_memory_capacity = 10000
         self.epsilon_base = 0.3
         self.epsilon_end = 0.1
-        self.epsilon_decay = math.log(2) / 50000
+        self.epsilon_decay = math.log(2) / 500000
         self.target_update_freq = 64
 
         # Adam Optimization parameters
