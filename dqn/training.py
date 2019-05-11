@@ -196,9 +196,13 @@ class Trainer(object):
     def to_action(self, index):
         """ converts a raw action index into an action shape """
         indices = np.unravel_index(index, self.hyperams.action_shape)
-        x = indices[0] / self.hyperams.action_shape[0]
-        y = indices[1] / self.hyperams.action_shape[1]
-        return x, y, indices[2]
+        # x = indices[0] / self.hyperams.action_shape[0]
+        # y = indices[1] / self.hyperams.action_shape[1]
+
+        theta = 2 * np.pi * indices[0] / self.hyperams.action_shape[0]
+        x = np.cos(theta)
+        y = np.sin(theta)
+        return x, y, 0
 
     def to_tensor_batch(self, transition_batch):
         """ converts a batch (i.e. simple list) of Transition objects

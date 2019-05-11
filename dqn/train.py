@@ -48,12 +48,12 @@ def main():
         'frames_per_step': 4,
         'arena_size': 1000,
         'num_pellets': 1000,
-        'num_viruses': 0,
+        'num_viruses': 25,
         'num_bots': 0,
         'pellet_regen': True
     })
 
-    extractor = FeatureExtractor(num_pellet=10, num_virus=0, num_food=0, num_other=0, num_cell=1)
+    extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=0)
     state_size = extractor.size
     action_size = np.prod(hyperams.action_shape)
 

@@ -11,6 +11,7 @@ to start tensorboard during training
       
 # todo
 
+- make sure that action/target mapping is well distributed
 - Report information from the environment about what's happening (to tensorboard)
 - Report estimated Q values to tensorboard
 
