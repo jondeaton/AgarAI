@@ -100,6 +100,11 @@ class Trainer(object):
             state_fts = next_state_fts
 
             action = self.choose_action(state_fts)
+
+            # todo: wtf why sometimes this doesn't work
+            # if state_fts is not None:
+            #     dx, dy = state_fts / np.linalg.norm(state_fts)
+            #     action = dx, dy, 0
             next_state, reward, done, info = self.env.step(action)
             next_state_fts = self.to_features(next_state)
             total_returns += reward
