@@ -16,10 +16,10 @@ class HyperParameters(object):
 
         # Agario Game parameters
         self.frames_per_step = 4
-        self.arena_size = 100
-        self.num_pellets = 110
-        self.num_viruses = 0
-        self.num_bots = 0
+        self.arena_size = 1000
+        self.num_pellets = 1000
+        self.num_viruses = 25
+        self.num_bots = 25
         self.pellet_regen = True
 
         self.action_shape = (16, )
@@ -29,24 +29,24 @@ class HyperParameters(object):
         self.gamma = 0.99
 
         # DQN parameters
-        self.double_dqn = False
-        self.dueling_dqn = False
+        self.double_dqn = True
+        self.dueling_dqn = True
 
         self.layer_sizes = [16, 16, 16]
 
-        self.batch_size = 4
+        self.batch_size = 32
         self.replay_memory_capacity = 10000
 
-        self.epsilon_base = 0.1
-        self.epsilon_end = 0.0
+        self.epsilon_base = 1.0
+        self.epsilon_end = 0.1
         self.epsilon_decay = math.log(2) / 500000
-        self.target_update_freq = 50
+        self.target_update_freq = 100
 
         # Adam Optimization parameters
-        self.lr = 0.1
+        self.lr = 0.0025
         self.adam_betas = (0.9, 0.999)
         self.adam_eps = 1e-8
-        self.grad_clip_norm = False
+        self.grad_clip_norm = 1
 
     def override(self, params):
         """
