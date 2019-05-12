@@ -101,6 +101,8 @@ class Trainer(object):
 
             action = self.choose_action(state_fts)
             next_state, reward, done, info = self.env.step(action)
+            self.env.render()
+
             next_state_fts = self.to_features(next_state)
             total_returns += reward
 
@@ -185,8 +187,9 @@ class Trainer(object):
 
     def choose_action(self, features):
         """ Chooses an action to take in state 's' using epsilon-greedy policy """
-        if features is None or torch.rand(1).item() <= self.epsilon:
-            index = torch.randint(self.num_actions, (1,)).item()
+
+        if features is None or random.random() <= self.epsilon:
+            index = random.randint(0, self.num_actions - 1)
         else:
             s_tensor = torch.from_numpy(features).type(torch.FloatTensor).to(self.device)
             qa = self.q(s_tensor)
@@ -196,9 +199,10 @@ class Trainer(object):
     def to_action(self, index):
         """ converts a raw action index into an action shape """
         indices = np.unravel_index(index, self.hyperams.action_shape)
-        x = indices[0] / self.hyperams.action_shape[0]
-        y = indices[1] / self.hyperams.action_shape[1]
-        return x, y, indices[2]
+        theta = 2 * np.pi * indices[0] / self.hyperams.action_shape[0]
+        x = np.cos(theta)
+        y = np.sin(theta)
+        return x, y, 0
 
     def to_tensor_batch(self, transition_batch):
         """ converts a batch (i.e. simple list) of Transition objects

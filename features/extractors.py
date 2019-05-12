@@ -45,7 +45,7 @@ class FeatureExtractor:
         for player in closest_players:
             player_cells = self.largest_cells(player, n=self.num_cell)
             player_features = self.get_entity_features(loc, player_cells, self.num_cell)
-            players_features.append(players_features)
+            players_features.append(player_features)
 
         # there might not be enough players at all, so just pad the rest
         while len(players_features) < self.num_other:
