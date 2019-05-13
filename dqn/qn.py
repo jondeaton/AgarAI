@@ -17,10 +17,6 @@ class StateEncoder(nn.Module):
     def __init__(self, state_size: int, layer_sizes: List[int],
                  p_dropout=0, device=None):
         super(StateEncoder, self).__init__()
-        self._layer_sizes = layer_sizes.copy()
-
-        if not layer_sizes:
-            raise ValueError("Layer sizes must not be empty list")
 
         self._layers = list()
         prev_size = state_size
@@ -31,9 +27,7 @@ class StateEncoder(nn.Module):
 
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(p=p_dropout).to(device)
-
         self.device = device
-
 
     def forward(self, s) -> torch.Tensor:
         if isinstance(s, np.ndarray):
@@ -80,12 +74,11 @@ class DQN(nn.Module):
                  p_dropout=0, device=None):
         super(DQN, self).__init__()
 
-        self.encoder = StateEncoder(state_size, layer_sizes, p_dropout=p_dropout,
-                                    device=device)
+        self.encoder = StateEncoder(state_size, layer_sizes,
+                                    p_dropout=p_dropout, device=device)
 
-        last_layer_size = layer_sizes[-1]
+        last_layer_size = layer_sizes[-1] if layer_sizes else state_size
         self.last_layer = nn.Linear(last_layer_size, action_size, bias=True).to(device)
-
         self.device = device
 
     def forward(self, s) -> torch.Tensor:

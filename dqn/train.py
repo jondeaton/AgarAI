@@ -55,7 +55,7 @@ def main():
     logger.info("Creating Agar.io gym environment...")
     env = gym.make("agario-full-v0", **env_config)
 
-    extractor = FeatureExtractor(num_pellet=25, num_virus=3, num_food=3, num_other=5, num_cell=5)
+    extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=0)
     state_size = extractor.size
     action_size = np.prod(hyperams.action_shape)
 
