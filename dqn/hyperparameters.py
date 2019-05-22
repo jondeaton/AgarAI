@@ -14,6 +14,10 @@ class HyperParameters(object):
     def __init__(self):
         self.seed = 42
 
+        # to fill in by sub_classes
+        self.env_name = None
+        self.encoder_type = None
+
         # Agario Game parameters
         self.frames_per_step = 4
         self.arena_size = 10
@@ -22,7 +26,7 @@ class HyperParameters(object):
         self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (19, 5, )
+        self.action_shape = (4, 1, )
 
         self.episode_length = 100
         self.num_episodes = 10000
@@ -32,8 +36,6 @@ class HyperParameters(object):
         # DQN parameters
         self.double_dqn = True
         self.dueling_dqn = True
-
-        self.layer_sizes = [16, 16]
 
         self.batch_size = 32
         self.replay_memory_capacity = 500
@@ -77,3 +79,31 @@ class HyperParameters(object):
         hp = HyperParameters()
         hp.__dict__.update(data)
         return hp
+
+
+class FullEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(FullEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-full-v0"
+
+        self.num_pellets_features = 1
+        self.num_viruses_features = 0
+        self.num_food_features    = 0
+        self.num_other_features   = 0
+        self.num_cell_features    = 1
+
+        # Network parameters
+        self.encoder_type = 'linear'
+        self.layer_sizes = [16, 16]
+
+
+class ScreenEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(ScreenEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-screen-v0"
+        self.encoder_type = 'cnn'
+        self.screen_len = 128
+
+        self.feature_extractor = None

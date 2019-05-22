@@ -102,6 +102,7 @@ class Trainer(object):
             action_index = self.choose_action(state_fts)
             action = self.to_action(action_index)
             next_state, reward, done, info = self.env.step(action)
+
             self.env.render()
 
             next_state_fts = self.to_features(next_state)
@@ -129,11 +130,16 @@ class Trainer(object):
         """ Runs a single step of parameter optimization using a batch of experience
             examples from the replay buffer.
         """
+
+        # sample an experience batch from replay buffer
         batch, indexes, _ = self.replay_memory.sample(self.hyperams.batch_size)
         sars_batches = self.to_tensor_batch(batch)
         state_batch, action_batch, reward_batch, next_state_batch = sars_batches
 
-        Q_sa = self.get_Q(self.q, state_batch, action_batch)
+        # the estimate for the quality of taking those actions in those states
+        Q_sa = self.get_Qsa(self.q, state_batch, action_batch)
+
+        # the target of these estimates, using one-step backup
         target = self.get_target(sars_batches)
 
         loss = F.smooth_l1_loss(Q_sa, target)  # Hubert loss
@@ -154,7 +160,7 @@ class Trainer(object):
             # double DQN: choose action using online network
             ap = torch.argmax(self.q(next_state_batch), dim=1)
             # but use "stationary" target network to evaluate V(s')
-            Q_tgt = self.get_Q(self.target_q, next_state_batch, ap)
+            Q_tgt = self.get_Qsa(self.target_q, next_state_batch, ap)
         else:
             # vanilla DQN: just use target network maximization
             Q_tgt, _ = torch.max(self.target_q(next_state_batch), dim=1)
@@ -162,7 +168,7 @@ class Trainer(object):
         target = reward_batch + self.hyperams.gamma * Q_tgt
         return target
 
-    def get_Q(self, q, state_batch, action_batch):
+    def get_Qsa(self, q, state_batch, action_batch):
         Q_s = q(state_batch) # values for all actions
         # now, select from those, the actions specified in action_batch
         return torch.gather(Q_s, 1, action_batch.unsqueeze(dim=1)).squeeze()
@@ -171,7 +177,7 @@ class Trainer(object):
         sars_batches = self.to_tensor_batch(transition_batch)
         state_batch, action_batch, reward_batch, next_state_batch = sars_batches
 
-        Q_sa = self.get_Q(self.q, state_batch, action_batch)
+        Q_sa = self.get_Qsa(self.q, state_batch, action_batch)
         target = self.get_target(sars_batches)
 
         errors = torch.abs(Q_sa - target)
@@ -202,7 +208,7 @@ class Trainer(object):
         if features is None or random.random() <= self.epsilon:
             index = random.randint(0, self.num_actions - 1)
         else:
-            s_tensor = torch.from_numpy(features).type(torch.FloatTensor).to(self.device)
+            s_tensor = torch.from_numpy(features).unsqueeze(dim=0).type(torch.FloatTensor).to(self.device)
             qa = self.q(s_tensor)
             index = torch.argmax(qa).item()
         return index
@@ -211,7 +217,7 @@ class Trainer(object):
         """ converts a raw action index into an action shape """
         indices = np.unravel_index(index, self.hyperams.action_shape)
         theta = 2 * np.pi * indices[0] / self.hyperams.action_shape[0]
-        mag = indices[1] / self.hyperams.action_shape[1]
+        mag = 1 - indices[1] / self.hyperams.action_shape[1]
         x = np.cos(theta) * mag
         y = np.sin(theta) * mag
         return x, y, 0

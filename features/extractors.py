@@ -7,15 +7,14 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 import numpy as np
 from gym_agario.envs.AgarioFull import Observation
 
-
 class FeatureExtractor:
 
     def __init__(self, num_pellet=50, num_virus=5, num_food=10, num_other=5, num_cell=15):
         self.num_pellet = num_pellet
-        self.num_virus = num_virus
-        self.num_food = num_food
-        self.num_other = num_other
-        self.num_cell = num_cell
+        self.num_virus  = num_virus
+        self.num_food   = num_food
+        self.num_other  = num_other
+        self.num_cell   = num_cell
 
         self.size = 2 * num_pellet + 2 * num_virus + 2 * num_food + 5 * (1 + num_other) * num_cell
         self.filler_value = -1000
@@ -102,3 +101,18 @@ class FeatureExtractor:
 
         loc = np.average(player[:, (0, 1)], axis=0, weights=player[:, -1])
         return loc
+
+
+
+class ScreenFeatureExtractor:
+    def __init__(self):
+        pass
+
+    def __call__(self, observation):
+        return self.extract(observation)
+
+    def extract(self, observation):
+        assert isinstance(observation, np.ndarray)
+
+        # average over color channels => to black and white
+        return observation.mean(axis=-1)
