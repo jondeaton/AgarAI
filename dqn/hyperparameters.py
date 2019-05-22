@@ -16,15 +16,15 @@ class HyperParameters(object):
 
         # Agario Game parameters
         self.frames_per_step = 4
-        self.arena_size = 10
+        self.arena_size = 15
         self.num_pellets = 1
         self.num_viruses = 0
         self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (19, 5, )
+        self.action_shape = (4, 1, )
 
-        self.episode_length = 100
+        self.episode_length = 500
         self.num_episodes = 10000
         self.p_dropout = 0.05
         self.gamma = 0.99
@@ -36,7 +36,7 @@ class HyperParameters(object):
         self.layer_sizes = [16, 16]
 
         self.batch_size = 32
-        self.replay_memory_capacity = 500
+        self.replay_memory_capacity = 100
         self.lean_freq = 16
         self.target_update_freq = 128
 

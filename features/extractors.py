@@ -17,7 +17,8 @@ class FeatureExtractor:
         self.num_other = num_other
         self.num_cell = num_cell
 
-        self.size = 2 * num_pellet + 2 * num_virus + 2 * num_food + 5 * (1 + num_other) * num_cell
+        # self.size = 2 * num_pellet + 2 * num_virus + 2 * num_food + 5 * (1 + num_other) * num_cell
+        self.size = 3 * 3
         self.filler_value = -1000
 
     def __call__(self, observation: Observation):
@@ -32,42 +33,61 @@ class FeatureExtractor:
         loc = self.position(agent)
         if loc is None: return None # no player position
 
-        pellet_features = self.get_entity_features(loc, observation.pellets, self.num_pellet)
-        virus_features =  self.get_entity_features(loc, observation.viruses, self.num_virus)
-        food_features =   self.get_entity_features(loc, observation.foods, self.num_food)
+        pellet_grid_features = self.get_entity_grid_count(observation.pellets, loc, 3)
+        # pellet_features = self.get_entity_features(loc, observation.pellets, self.num_pellet)
+        # virus_features =  self.get_entity_features(loc, observation.viruses, self.num_virus)
+        # food_features =   self.get_entity_features(loc, observation.foods, self.num_food)
 
         largest_cells = self.largest_cells(agent, n=self.num_cell)
-        agent_cell_features = self.get_entity_features(loc, largest_cells, self.num_cell)
+        agent_cell_features = self.get_entity_features(loc, largest_cells, self.num_cell, relative=False)
 
+        # players_features = list()
+        # closest_players = self.closest_players(loc, observation.others, n=self.num_other)
+        # for player in closest_players:
+        #     player_cells = self.largest_cells(player, n=self.num_cell)
+        #     player_features = self.get_entity_features(loc, player_cells, self.num_cell)
+        #     players_features.append(player_features)
+        #
+        # # there might not be enough players at all, so just pad the rest
+        # while len(players_features) < self.num_other:
+        #     empty_features = self.empty_features(self.num_cell, 5)
+        #     players_features.append(empty_features)
+        #
+        # feature_stacks = [pellet_features, virus_features, food_features, agent_cell_features]
+        # feature_stacks.extend(players_features)
 
-        players_features = list()
-        closest_players = self.closest_players(loc, observation.others, n=self.num_other)
-        for player in closest_players:
-            player_cells = self.largest_cells(player, n=self.num_cell)
-            player_features = self.get_entity_features(loc, player_cells, self.num_cell)
-            players_features.append(player_features)
-
-        # there might not be enough players at all, so just pad the rest
-        while len(players_features) < self.num_other:
-            empty_features = self.empty_features(self.num_cell, 5)
-            players_features.append(empty_features)
-
-        feature_stacks = [pellet_features, virus_features, food_features, agent_cell_features]
-        feature_stacks.extend(players_features)
+        feature_stacks = [pellet_grid_features, agent_cell_features]
 
         flattened = list(map(lambda arr: arr.flatten(), feature_stacks))
         features = np.hstack(flattened)
         np.nan_to_num(features, copy=False)
         return features
 
-    def get_entity_features(self, loc, entities, n):
+    def get_entity_features(self, loc, entities, n, relative=True):
         _, ft_size = entities.shape
         entity_features = np.zeros((n, ft_size))
         close_entities = self.sort_by_proximity(loc, entities, n=n)
-        self.to_relative_pos(close_entities, loc)
+        if relative:
+            self.to_relative_pos(close_entities, loc)
         num_close, _ = close_entities.shape
         entity_features[:num_close] = close_entities
         return entity_features
+
+    def get_entity_grid_count(self, entities,loc, grid_size):
+        entity_features = np.zeros((grid_size, grid_size))
+        for entity in entities:
+            grid_x = int(entity[0] - loc[0])/5 + int(grid_size/2)
+            grid_y = int(entity[1] - loc[1])/5 + int(grid_size/2)
+            if grid_x < grid_size and grid_y < grid_size and grid_x >= 0 and grid_y >= 0:
+                entity_features[grid_x][grid_y] += 1
+        for i in range(grid_size):
+            for j in range(grid_size):
+                x_diff = i - int(grid_size/2)
+                y_diff = j - int(grid_size/2)
+                if x_diff + loc[0] > 50 or x_diff + loc[0] < 0 or y_diff + loc[1] > 50 or y_diff + loc[1] < 0:
+                    entity_features[i][j] = -1
+        return np.fliplr(entity_features)
+
 
     def largest_cells(self, player, n=None):
         order =  np.argsort(player[:, -1], axis=0)

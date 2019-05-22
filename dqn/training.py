@@ -102,6 +102,7 @@ class Trainer(object):
             action_index = self.choose_action(state_fts)
             action = self.to_action(action_index)
             next_state, reward, done, info = self.env.step(action)
+            print(next_state_fts)
             self.env.render()
 
             next_state_fts = self.to_features(next_state)
@@ -173,7 +174,6 @@ class Trainer(object):
 
         Q_sa = self.get_Q(self.q, state_batch, action_batch)
         target = self.get_target(sars_batches)
-
         errors = torch.abs(Q_sa - target)
         return errors.cpu().data.numpy()
 
@@ -198,12 +198,12 @@ class Trainer(object):
 
     def choose_action(self, features):
         """ Chooses an action to take in state 's' using epsilon-greedy policy """
-
         if features is None or random.random() <= self.epsilon:
             index = random.randint(0, self.num_actions - 1)
         else:
             s_tensor = torch.from_numpy(features).type(torch.FloatTensor).to(self.device)
             qa = self.q(s_tensor)
+            # print(qa, features)
             index = torch.argmax(qa).item()
         return index
 
