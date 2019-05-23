@@ -208,11 +208,11 @@ class Trainer(object):
         else:
 
             def fix_features(ft):
-                return torch.from_numpy(np.ascontiguousarray(ft)).unsqueeze(dim=0).type(torch.FloatTensor).to(self.device)
+                return torch.from_numpy(ft).unsqueeze(dim=0).type(torch.FloatTensor).to(self.device)
 
             s_tensor = fix_features(features)
             qa = self.q(s_tensor)
-            # print(qa, features)
+
             index = torch.argmax(qa).item()
         return index
 

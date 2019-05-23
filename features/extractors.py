@@ -52,7 +52,7 @@ class GridFeatureExtractor:
         entity_features = np.zeros((self.grid_size, self.grid_size))
         self.add_ones(loc, entities, entity_features)
         self.add_out_of_bounds(loc, entity_features)
-        return np.fliplr(entity_features)
+        return entity_features
 
     def add_ones(self, loc, entities, entity_features):
         for entity in entities:
