@@ -20,13 +20,12 @@ from dqn.qn import DQN, DuelingDQN, StateEncoder, ConvEncoder
 from dqn import HyperParameters
 from dqn.hyperparameters import  FullEnvHyperparameters, ScreenEnvHyperparameters
 
-from features.extractors import FeatureExtractor, ScreenFeatureExtractor
 import torch
 
 
 def make_q_networks(hyperams: HyperParameters, state_shape):
     """ creates an online and target Q network
-    :param hyperams: hyperparameters
+    :param hyperams: hyper-parameters
     :param state_shape: shape of the state in put into the networks
     :return: tuple containing the online and target Q networks
     """
@@ -35,9 +34,11 @@ def make_q_networks(hyperams: HyperParameters, state_shape):
     if hyperams.encoder_type == 'linear':
         encoder        = StateEncoder(state_shape, hyperams.layer_sizes, p_dropout=hyperams.p_dropout, device=device)
         target_encoder = StateEncoder(state_shape, hyperams.layer_sizes, p_dropout=hyperams.p_dropout, device=device)
+
     elif hyperams.encoder_type == 'cnn':
         encoder        = ConvEncoder(state_shape, device=device)
         target_encoder = ConvEncoder(state_shape, device=device)
+
     else:
         raise ValueError(f"Unknown encoder type: {hyperams.encoder_type}")
 
@@ -51,24 +52,39 @@ def make_q_networks(hyperams: HyperParameters, state_shape):
     return q, target_q
 
 
-def get_feature_extractor(env_type, hyperams: HyperParameters):
+def get_feature_extractor(hyperams: HyperParameters):
     """ creates a feature extractor object for the given environment
-    :param env_type: the type of environment, either "full" or "screen"
-    :param hyperams: hyperparameters
+    :param hyperams: hyper-parameters object
     :return: a feature extractor to extract feature vectors from states
     """
-    if env_type == "full":
+    if hyperams.extractor_type == "full":
         assert isinstance(hyperams, FullEnvHyperparameters)
+        from features.extractors import FeatureExtractor
         extractor = FeatureExtractor(num_pellet = hyperams.num_pellets_features,
                                      num_virus  = hyperams.num_viruses_features,
                                      num_food   = hyperams.num_food_features,
                                      num_other  = hyperams.num_other_features,
                                      num_cell   = hyperams.num_cell_features)
-    elif env_type == "screen":
+
+    elif hyperams.extractor_type == "grid":
+        assert isinstance(hyperams, FullEnvHyperparameters)
+        from features.extractors import GridFeatureExtractor
+        extractor = GridFeatureExtractor(hyperams.ft_extractor_view_size,
+                                         hyperams.ft_extractor_grid_size,
+                                         hyperams.arena_size,
+                                         grid_shaped=hyperams.ft_grid_shaped)
+
+    elif hyperams.extractor_type == "screen":
         assert isinstance(hyperams, ScreenEnvHyperparameters)
-        extractor = ScreenFeatureExtractor()
+        from features.extractors import ScreenFeatureExtractor
+        extractor = ScreenFeatureExtractor(hyperams.frames_per_step, hyperams.screen_len)
+
+    elif hyperams.extractor_type is None:
+        extractor = None
+
     else:
-        raise ValueError(env_type)
+        raise ValueError(f"Unknown extractor type: {hyperams.extractor_type}")
+
     return extractor
 
 
@@ -98,17 +114,15 @@ def main():
             'num_viruses':     hyperams.num_viruses,
             'num_bots':        hyperams.num_bots,
             'pellet_regen':    hyperams.pellet_regen,
-            'screen_len':      hyperams.screen_len if args.env_type == "screen" else None
         }
+    if args.env_type == "screen":
+        env_config["screen_len"] = hyperams.screen_len
 
     logger.info(f"Creating Agar.io gym environment of type: {hyperams.env_name}")
     env = gym.make(hyperams.env_name, **env_config)
 
-    extractor = get_feature_extractor(args.env_type, hyperams)
-    if args.env_type == "full":
-        state_shape = (extractor.size, )
-    else:
-        state_shape = (hyperams.frames_per_step, hyperams.screen_len, hyperams.screen_len)
+    extractor = get_feature_extractor(hyperams)
+    state_shape = extractor.shape
 
     logger.info("Creating Q network...")
     q, target_q = make_q_networks(hyperams, state_shape)
