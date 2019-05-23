@@ -102,7 +102,7 @@ class Trainer(object):
             action_index = self.choose_action(state_fts)
             action = self.to_action(action_index)
             next_state, reward, done, info = self.env.step(action)
-            print(next_state_fts)
+
             self.env.render()
 
             next_state_fts = self.to_features(next_state)
@@ -211,7 +211,7 @@ class Trainer(object):
         """ converts a raw action index into an action shape """
         indices = np.unravel_index(index, self.hyperams.action_shape)
         theta = 2 * np.pi * indices[0] / self.hyperams.action_shape[0]
-        mag = indices[1] / self.hyperams.action_shape[1]
+        mag = 1 - indices[1] / self.hyperams.action_shape[1]
         x = np.cos(theta) * mag
         y = np.sin(theta) * mag
         return x, y, 0
