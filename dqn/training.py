@@ -142,7 +142,7 @@ class Trainer(object):
         # the target of these estimates, using one-step backup
         target = self.get_target(sars_batches)
 
-        loss = F.smooth_l1_loss(Q_sa, target)  # Hubert loss
+        loss = F.smooth_l1_loss(Q_sa, target)  # Huber loss
         tensorboard.log_scalar("train/loss", float(loss), self.gradient_steps)
         tensorboard.log_scalar("train/Qsa", float(torch.mean(Q_sa)), self.gradient_steps)
 
