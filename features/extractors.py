@@ -7,9 +7,10 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 import numpy as np
 from gym_agario.envs.AgarioFull import Observation
 
+
 class GridFeatureExtractor:
 
-    def __init__(self, view_size, grid_size, arena_size, num_cell=0):
+    def __init__(self, view_size, grid_size, arena_size, num_cell=0, grid_shaped=False):
         self.view_size = view_size
         self.grid_size = grid_size
 
@@ -18,8 +19,12 @@ class GridFeatureExtractor:
 
         self.arena_size = arena_size
         self.num_cell = num_cell
+        self.grid_shaped = grid_shaped
 
-        self.size = grid_size * grid_size + 5 * num_cell
+        if grid_shaped:
+            self.shape = (1, grid_size, grid_size, )
+        else:
+            self.shape = (grid_size * grid_size + 5 * num_cell)
 
     def __call__(self, observation: Observation):
         return self.extract(observation)
@@ -30,6 +35,9 @@ class GridFeatureExtractor:
         if loc is None: return None  # no player position
 
         pellet_grid_features = self.get_entity_grid_count(observation.pellets, loc)
+        if self.grid_shaped:
+            return np.expand_dims(pellet_grid_features, 0)
+
         large_cells = largest_cells(agent, n=self.num_cell)
         agent_cell_features = get_entity_features(loc, large_cells, self.num_cell, relative=False)
 
@@ -44,7 +52,7 @@ class GridFeatureExtractor:
         entity_features = np.zeros((self.grid_size, self.grid_size))
         self.add_ones(loc, entities, entity_features)
         self.add_out_of_bounds(loc, entity_features)
-        return np.fliplr(entity_features)
+        return entity_features
 
     def add_ones(self, loc, entities, entity_features):
         for entity in entities:
@@ -67,16 +75,18 @@ class GridFeatureExtractor:
                 if not (0 <= x_loc < self.arena_size and 0 <= y_loc < self.arena_size):
                     entity_features[i][j] = sentinel_value
 
+
 class FeatureExtractor:
 
     def __init__(self, num_pellet=50, num_virus=5, num_food=10, num_other=5, num_cell=15):
         self.num_pellet = num_pellet
-        self.num_virus = num_virus
-        self.num_food = num_food
-        self.num_other = num_other
-        self.num_cell = num_cell
+        self.num_virus  = num_virus
+        self.num_food   = num_food
+        self.num_other  = num_other
+        self.num_cell   = num_cell
 
         self.size = 2 * num_pellet + 2 * num_virus + 2 * num_food + 5 * (1 + num_other) * num_cell
+        self.shape = (self.size, )
         self.filler_value = -1000
 
     def __call__(self, observation: Observation):
@@ -118,6 +128,25 @@ class FeatureExtractor:
         np.nan_to_num(features, copy=False)
         return features
 
+
+class ScreenFeatureExtractor:
+    def __init__(self, num_frames, screen_len):
+        self.screen_len = screen_len
+        self.shape = (num_frames, screen_len, screen_len)
+
+    def __call__(self, observation):
+        return self.extract(observation)
+
+    def extract(self, observation):
+        assert isinstance(observation, np.ndarray)
+
+        # average over color channels => to black and white
+        return observation.mean(axis=-1)
+
+
+
+
+# ======== utility functions =================
 
 def get_entity_features(loc, entities, n, relative=True):
     _, ft_size = entities.shape

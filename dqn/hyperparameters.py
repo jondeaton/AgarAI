@@ -14,10 +14,15 @@ class HyperParameters(object):
     def __init__(self):
         self.seed = 42
 
+        # to fill in by sub_classes
+        self.env_name = None
+        self.encoder_type = None
+        self.extractor_type = None
+
         # Agario Game parameters
         self.frames_per_step = 4
-        self.arena_size = 15
-        self.num_pellets = 3
+        self.arena_size = 45
+        self.num_pellets = 30
         self.num_viruses = 0
         self.num_bots = 0
         self.pellet_regen = True
@@ -33,8 +38,6 @@ class HyperParameters(object):
         self.double_dqn = True
         self.dueling_dqn = True
 
-        self.layer_sizes = [16, 16]
-
         self.batch_size = 32
         self.replay_memory_capacity = 10000
         self.lean_freq = 16
@@ -43,11 +46,6 @@ class HyperParameters(object):
         self.epsilon_base = 0.5
         self.epsilon_end = 0.05
         self.epsilon_decay = math.log(2) / 500
-
-        self.extractor_type = "grid" # or "full"
-
-        self.ft_extractor_grid_size = 9
-        self.ft_extractor_view_size = 15
 
         # Adam Optimization parameters
         self.lr = 0.001
@@ -82,3 +80,37 @@ class HyperParameters(object):
         hp = HyperParameters()
         hp.__dict__.update(data)
         return hp
+
+
+class FullEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(FullEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-full-v0"
+
+        self.num_pellets_features = 1
+        self.num_viruses_features = 0
+        self.num_food_features    = 0
+        self.num_other_features   = 0
+        self.num_cell_features    = 1
+
+        # Network parameters
+        self.encoder_type = 'cnn'
+        self.layer_sizes = [16, 16]
+
+        self.extractor_type = "grid"  # or "full"
+
+        self.ft_extractor_grid_size = 128
+        self.ft_extractor_view_size = 30
+        self.ft_grid_shaped = True
+
+
+class ScreenEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(ScreenEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-screen-v0"
+        self.encoder_type = 'cnn'
+        self.screen_len = 128
+
+        self.feature_extractor = None

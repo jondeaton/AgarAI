@@ -8,7 +8,6 @@ import os, sys
 import argparse, logging
 
 logger = logging.getLogger()
-from config import config
 from log import tensorboard
 
 import numpy as np
@@ -17,16 +16,82 @@ import gym
 import gym_agario
 
 from dqn.training import Trainer
-from dqn.qn import DQN, DuelingDQN
+from dqn.qn import DQN, DuelingDQN, StateEncoder, ConvEncoder
 from dqn import HyperParameters
+from dqn.hyperparameters import  FullEnvHyperparameters, ScreenEnvHyperparameters
 
 import torch
+
+
+def make_q_networks(hyperams: HyperParameters, state_shape):
+    """ creates an online and target Q network
+    :param hyperams: hyper-parameters
+    :param state_shape: shape of the state in put into the networks
+    :return: tuple containing the online and target Q networks
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    if hyperams.encoder_type == 'linear':
+        encoder        = StateEncoder(state_shape, hyperams.layer_sizes, p_dropout=hyperams.p_dropout, device=device)
+        target_encoder = StateEncoder(state_shape, hyperams.layer_sizes, p_dropout=hyperams.p_dropout, device=device)
+
+    elif hyperams.encoder_type == 'cnn':
+        encoder        = ConvEncoder(state_shape, device=device)
+        target_encoder = ConvEncoder(state_shape, device=device)
+
+    else:
+        raise ValueError(f"Unknown encoder type: {hyperams.encoder_type}")
+
+    network = DuelingDQN if hyperams.dueling_dqn else DQN
+    action_size = np.prod(hyperams.action_shape)
+
+    # make the Q networks on top of the encoder
+    q        = network(encoder,        action_size, device=device)
+    target_q = network(target_encoder, action_size, device=device)
+
+    return q, target_q
+
+
+def get_feature_extractor(hyperams: HyperParameters):
+    """ creates a feature extractor object for the given environment
+    :param hyperams: hyper-parameters object
+    :return: a feature extractor to extract feature vectors from states
+    """
+    if hyperams.extractor_type == "full":
+        assert isinstance(hyperams, FullEnvHyperparameters)
+        from features.extractors import FeatureExtractor
+        extractor = FeatureExtractor(num_pellet = hyperams.num_pellets_features,
+                                     num_virus  = hyperams.num_viruses_features,
+                                     num_food   = hyperams.num_food_features,
+                                     num_other  = hyperams.num_other_features,
+                                     num_cell   = hyperams.num_cell_features)
+
+    elif hyperams.extractor_type == "grid":
+        assert isinstance(hyperams, FullEnvHyperparameters)
+        from features.extractors import GridFeatureExtractor
+        extractor = GridFeatureExtractor(hyperams.ft_extractor_view_size,
+                                         hyperams.ft_extractor_grid_size,
+                                         hyperams.arena_size,
+                                         grid_shaped=hyperams.ft_grid_shaped)
+
+    elif hyperams.extractor_type == "screen":
+        assert isinstance(hyperams, ScreenEnvHyperparameters)
+        from features.extractors import ScreenFeatureExtractor
+        extractor = ScreenFeatureExtractor(hyperams.frames_per_step, hyperams.screen_len)
+
+    elif hyperams.extractor_type is None:
+        extractor = None
+
+    else:
+        raise ValueError(f"Unknown extractor type: {hyperams.extractor_type}")
+
+    return extractor
 
 
 def main():
     args = parse_args()
 
-    hyperams = HyperParameters()
+    hyperams = FullEnvHyperparameters() if args.env_type == "full" else ScreenEnvHyperparameters()
     hyperams.override(args)
 
     output_dir = args.output
@@ -48,33 +113,19 @@ def main():
             'num_pellets':     hyperams.num_pellets,
             'num_viruses':     hyperams.num_viruses,
             'num_bots':        hyperams.num_bots,
-            'pellet_regen':    hyperams.pellet_regen
+            'pellet_regen':    hyperams.pellet_regen,
         }
+    if args.env_type == "screen":
+        env_config["screen_len"] = hyperams.screen_len
 
-    logger.info("Creating Agar.io gym environment...")
-    env = gym.make("agario-full-v0", **env_config)
+    logger.info(f"Creating Agar.io gym environment of type: {hyperams.env_name}")
+    env = gym.make(hyperams.env_name, **env_config)
 
-    if hyperams.extractor_type == "full":
-        from features.extractors import FeatureExtractor
-        extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=0)
-    elif hyperams.extractor_type == "grid":
-        from features.extractors import GridFeatureExtractor
-        extractor = GridFeatureExtractor(hyperams.ft_extractor_view_size,
-                                         hyperams.ft_extractor_grid_size,
-                                         hyperams.arena_size)
-    else:
-        raise ValueError(hyperams.extractor_type)
-
-    state_size = extractor.size
-    action_size = np.prod(hyperams.action_shape)
+    extractor = get_feature_extractor(hyperams)
+    state_shape = extractor.shape
 
     logger.info("Creating Q network...")
-    network = DuelingDQN if hyperams.dueling_dqn else DQN
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    q = network(state_size, action_size, hyperams.layer_sizes,
-                p_dropout=hyperams.p_dropout, device=device)
-    target_q = network(state_size, action_size, hyperams.layer_sizes,
-                       p_dropout=hyperams.p_dropout, device=device)
+    q, target_q = make_q_networks(hyperams, state_shape)
 
     logger.info("Training...")
     trainer = Trainer(env, q, target_q, hyperams=hyperams, extractor=extractor)
@@ -100,6 +151,10 @@ def get_training_dir(output_dir, name):
 def parse_args():
     parser = argparse.ArgumentParser(description="Train DQN Model",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+    env_options = parser.add_argument_group("Environment")
+    env_options.add_argument("--env", default="full", choices=["full", "screen"], dest="env_type",
+                             help="Environment type")
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")

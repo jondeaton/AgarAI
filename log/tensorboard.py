@@ -6,7 +6,6 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 
 import tensorflow as tf
 
-
 class Tensorboard:
     _instance = None
     @staticmethod
