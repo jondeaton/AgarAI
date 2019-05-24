@@ -20,7 +20,6 @@ from dqn.training import Trainer
 from dqn.qn import DQN, DuelingDQN
 from dqn import HyperParameters
 
-from features.extractors import FeatureExtractor
 import torch
 
 
@@ -55,7 +54,17 @@ def main():
     logger.info("Creating Agar.io gym environment...")
     env = gym.make("agario-full-v0", **env_config)
 
-    extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=0)
+    if hyperams.extractor_type == "full":
+        from features.extractors import FeatureExtractor
+        extractor = FeatureExtractor(num_pellet=1, num_virus=0, num_food=0, num_other=0, num_cell=0)
+    elif hyperams.extractor_type == "grid":
+        from features.extractors import GridFeatureExtractor
+        extractor = GridFeatureExtractor(hyperams.ft_extractor_view_size,
+                                         hyperams.ft_extractor_grid_size,
+                                         hyperams.arena_size)
+    else:
+        raise ValueError(hyperams.extractor_type)
+
     state_size = extractor.size
     action_size = np.prod(hyperams.action_shape)
 
