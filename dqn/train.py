@@ -72,7 +72,11 @@ def get_feature_extractor(hyperams: HyperParameters):
         extractor = GridFeatureExtractor(hyperams.ft_extractor_view_size,
                                          hyperams.ft_extractor_grid_size,
                                          hyperams.arena_size,
-                                         grid_shaped=hyperams.ft_grid_shaped)
+                                         cells=hyperams.grid_add_cells,
+                                         others=hyperams.grid_add_others,
+                                         viruses=hyperams.grid_add_others,
+                                         food=hyperams.grid_add_foods,
+                                         flat=hyperams.flat_grid_features)
 
     elif hyperams.extractor_type == "screen":
         assert isinstance(hyperams, ScreenEnvHyperparameters)

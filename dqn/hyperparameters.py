@@ -21,13 +21,13 @@ class HyperParameters(object):
 
         # Agario Game parameters
         self.frames_per_step = 4
-        self.arena_size = 45
-        self.num_pellets = 30
-        self.num_viruses = 0
-        self.num_bots = 0
+        self.arena_size = 1000
+        self.num_pellets = 1000
+        self.num_viruses = 25
+        self.num_bots = 25
         self.pellet_regen = True
 
-        self.action_shape = (4, 1, )
+        self.action_shape = (19, 4, 2)
 
         self.episode_length = 500
         self.num_episodes = 10000
@@ -88,21 +88,29 @@ class FullEnvHyperparameters(HyperParameters):
 
         self.env_name = "agario-full-v0"
 
+        # Network parameters
+        self.encoder_type = 'cnn'
+        self.layer_sizes = [16, 16]
+
+        # settings for the "grid" feature extraactor
+        self.extractor_type = "grid"
+        self.ft_extractor_grid_size = 128
+        self.ft_extractor_view_size = 30
+        self.flat_grid_features = False
+
+        self.grid_add_cells = True
+        self.grid_add_viruses = True
+        self.grid_add_others = True
+        self.grid_add_foods = False
+
+
+        # settings for "full" feature extractor
+        # self.extractor_type = "full"
         self.num_pellets_features = 1
         self.num_viruses_features = 0
         self.num_food_features    = 0
         self.num_other_features   = 0
         self.num_cell_features    = 1
-
-        # Network parameters
-        self.encoder_type = 'cnn'
-        self.layer_sizes = [16, 16]
-
-        self.extractor_type = "grid"  # or "full"
-
-        self.ft_extractor_grid_size = 128
-        self.ft_extractor_view_size = 30
-        self.ft_grid_shaped = True
 
 
 class ScreenEnvHyperparameters(HyperParameters):

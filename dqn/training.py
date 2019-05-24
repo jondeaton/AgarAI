@@ -221,9 +221,10 @@ class Trainer(object):
         indices = np.unravel_index(index, self.hyperams.action_shape)
         theta = 2 * np.pi * indices[0] / self.hyperams.action_shape[0]
         mag = 1 - indices[1] / self.hyperams.action_shape[1]
+        act = indices[2]
         x = np.cos(theta) * mag
         y = np.sin(theta) * mag
-        return x, y, 0
+        return x, y, act
 
     def to_tensor_batch(self, transition_batch):
         """ converts a batch (i.e. simple list) of Transition objects
