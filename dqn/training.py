@@ -156,14 +156,15 @@ class Trainer(object):
         _, _, reward_batch, non_final_mask, next_state_batch = sars_batches
         Q_tgt = torch.zeros_like(reward_batch, device=self.device)
 
-        if self.hyperams.double_dqn:
-            # double DQN: choose action using online network
-            ap = torch.argmax(self.q(next_state_batch), dim=1)
-            # but use "stationary" target network to evaluate V(s')
-            Q_tgt[non_final_mask] = self.get_Qsa(self.target_q, next_state_batch, ap)
-        else:
-            # vanilla DQN: just use target network maximization
-            Q_tgt[non_final_mask], _ = torch.max(self.target_q(next_state_batch), dim=1)
+        if next_state_batch is not None:
+            if self.hyperams.double_dqn:
+                # double DQN: choose action using online network
+                ap = torch.argmax(self.q(next_state_batch), dim=1)
+                # but use "stationary" target network to evaluate V(s')
+                Q_tgt[non_final_mask] = self.get_Qsa(self.target_q, next_state_batch, ap)
+            else:
+                # vanilla DQN: just use target network maximization
+                Q_tgt[non_final_mask], _ = torch.max(self.target_q(next_state_batch), dim=1)
 
         target = reward_batch + self.hyperams.gamma * Q_tgt
         return target
