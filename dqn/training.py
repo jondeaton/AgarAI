@@ -236,6 +236,7 @@ class Trainer(object):
         def to_tensor(array_list):
             """ converts a list of numpy arrays into a single tensor """
             tensors = tuple(torch.from_numpy(np.array(a)) for a in array_list if a is not None)
+            if not tensors: return None
             return torch.stack(tensors, dim=0).type(torch.FloatTensor).to(self.device)
 
         feature_batch = to_tensor(batch.state)
