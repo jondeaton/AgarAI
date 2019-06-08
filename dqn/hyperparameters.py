@@ -21,13 +21,13 @@ class HyperParameters(object):
 
         # Agario Game parameters
         self.frames_per_step = 4
-        self.arena_size = 1000
-        self.num_pellets = 1000
-        self.num_viruses = 25
-        self.num_bots = 25
+        self.arena_size = 45
+        self.num_pellets = 30
+        self.num_viruses = 0
+        self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (19, 4, 2)
+        self.action_shape = (4, 1, 1)
 
         self.episode_length = 500
         self.num_episodes = 10000
