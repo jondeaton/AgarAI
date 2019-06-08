@@ -130,11 +130,10 @@ class Trainer(object):
         """ Runs a single step of parameter optimization using a batch of experience
             examples from the replay buffer.
         """
-
         # sample an experience batch from replay buffer
         batch, indexes, _ = self.replay_memory.sample(self.hyperams.batch_size)
         sars_batches = self.to_tensor_batch(batch)
-        state_batch, action_batch, reward_batch, next_state_batch = sars_batches
+        state_batch, action_batch, reward_batch, _, next_state_batch = sars_batches
 
         # the estimate for the quality of taking those actions in those states
         Q_sa = self.get_Qsa(self.q, state_batch, action_batch)
@@ -154,16 +153,17 @@ class Trainer(object):
         self.optimize_q(loss)
 
     def get_target(self, sars_batches: Tuple):
-        state_batch, _, reward_batch, next_state_batch = sars_batches
+        _, _, reward_batch, non_final_mask, next_state_batch = sars_batches
+        Q_tgt = torch.zeros_like(reward_batch, device=self.device)
 
         if self.hyperams.double_dqn:
             # double DQN: choose action using online network
             ap = torch.argmax(self.q(next_state_batch), dim=1)
             # but use "stationary" target network to evaluate V(s')
-            Q_tgt = self.get_Qsa(self.target_q, next_state_batch, ap)
+            Q_tgt[non_final_mask] = self.get_Qsa(self.target_q, next_state_batch, ap)
         else:
             # vanilla DQN: just use target network maximization
-            Q_tgt, _ = torch.max(self.target_q(next_state_batch), dim=1)
+            Q_tgt[non_final_mask], _ = torch.max(self.target_q(next_state_batch), dim=1)
 
         target = reward_batch + self.hyperams.gamma * Q_tgt
         return target
@@ -175,7 +175,7 @@ class Trainer(object):
 
     def get_errors(self, transition_batch: List[Transition]):
         sars_batches = self.to_tensor_batch(transition_batch)
-        state_batch, action_batch, reward_batch, next_state_batch = sars_batches
+        state_batch, action_batch, reward_batch, _, next_state_batch = sars_batches
 
         Q_sa = self.get_Qsa(self.q, state_batch, action_batch)
         target = self.get_target(sars_batches)
@@ -235,7 +235,7 @@ class Trainer(object):
 
         def to_tensor(array_list):
             """ converts a list of numpy arrays into a single tensor """
-            tensors = tuple(torch.from_numpy(np.array(a)) for a in array_list)
+            tensors = tuple(torch.from_numpy(np.array(a)) for a in array_list if a is not None)
             return torch.stack(tensors, dim=0).type(torch.FloatTensor).to(self.device)
 
         feature_batch = to_tensor(batch.state)
@@ -243,10 +243,12 @@ class Trainer(object):
         reward_batch = to_tensor(batch.reward)
         next_feature_batch = to_tensor(batch.next_state)
 
-        return feature_batch, action_batch, reward_batch, next_feature_batch
+        non_final_mask = torch.tensor(tuple(s is not None for s in batch.next_state), device=self.device, dtype=torch.uint8)
+
+        return feature_batch, action_batch, reward_batch, non_final_mask, next_feature_batch
 
     def to_features(self, observation):
-        if self.extractor is None:
+        if self.extractor is None or observation is None:
             return observation
         else:
             return self.extractor(observation)
