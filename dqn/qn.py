@@ -15,8 +15,7 @@ def to_sate_tensor(s, device):
     return torch.from_numpy(s).to(device=device, dtype=torch.float32)
 
 class StateEncoder(nn.Module):
-    def __init__(self, state_shape: Tuple, layer_sizes: List[int],
-                 p_dropout=0, device=None):
+    def __init__(self, state_shape: Tuple, layer_sizes: List[int], p_dropout=0, device=None):
         super(StateEncoder, self).__init__()
         if len(state_shape) > 1:
             raise ValueError("State must be a flat vector")

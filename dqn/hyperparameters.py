@@ -122,3 +122,19 @@ class ScreenEnvHyperparameters(HyperParameters):
         self.screen_len = 128
 
         self.feature_extractor = None
+
+
+class GridEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(GridEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-grid-v0"
+        self.encoder_type = 'cnn'
+
+        self.grid_size = 128
+        self.observe_pellets = True
+        self.observe_viruses = False
+        self.observe_cells = False
+        self.observe_others = False
+
+        self.feature_extractor = None
