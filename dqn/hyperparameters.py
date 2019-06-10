@@ -21,13 +21,13 @@ class HyperParameters(object):
 
         # Agario Game parameters
         self.frames_per_step = 4
-        self.arena_size = 1000
-        self.num_pellets = 1000
-        self.num_viruses = 25
-        self.num_bots = 25
+        self.arena_size = 45
+        self.num_pellets = 30
+        self.num_viruses = 0
+        self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (19, 4, 2)
+        self.action_shape = (4, 1, 1)
 
         self.episode_length = 500
         self.num_episodes = 10000
@@ -58,8 +58,8 @@ class HyperParameters(object):
         Overrides attributes of this object with those of "params".
         All attributes of "params" which are also attributes of this object will be set
         to the values found in "params". This is particularly useful for over-riding
-        hyperparamers from command-line arguments
-        :param settings: Object with attributes to override in this object
+        hyper-parameters from command-line arguments
+        :param params: Object with attributes to override in this object
         :return: None
         """
         for attr in vars(params):
@@ -120,5 +120,21 @@ class ScreenEnvHyperparameters(HyperParameters):
         self.env_name = "agario-screen-v0"
         self.encoder_type = 'cnn'
         self.screen_len = 128
+
+        self.feature_extractor = None
+
+
+class GridEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(GridEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-grid-v0"
+        self.encoder_type = 'cnn'
+
+        self.grid_size = 128
+        self.observe_pellets = True
+        self.observe_viruses = False
+        self.observe_cells = False
+        self.observe_others = False
 
         self.feature_extractor = None

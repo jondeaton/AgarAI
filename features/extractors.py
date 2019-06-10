@@ -5,7 +5,7 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
 import numpy as np
-from gym_agario.envs.AgarioFull import Observation
+from gym_agario.envs.FullEnv import FullObservation
 
 
 class GridFeatureExtractor:
@@ -33,10 +33,10 @@ class GridFeatureExtractor:
         if flat:
             self.shape = tuple(np.prod(self.shape))
 
-    def __call__(self, observation: Observation):
+    def __call__(self, observation: FullObservation):
         return self.extract(observation)
 
-    def extract(self, observation: Observation):
+    def extract(self, observation: FullObservation):
         agent = observation.agent
         loc = position(agent)
         if loc is None: return None  # no player position
@@ -109,10 +109,10 @@ class FeatureExtractor:
         self.shape = (self.size, )
         self.filler_value = -1000
 
-    def __call__(self, observation: Observation):
+    def __call__(self, observation: FullObservation):
         return self.extract(observation)
 
-    def extract(self, observation: Observation):
+    def extract(self, observation: FullObservation):
         """ extracts features from an observation into a fixed-size feature vector
         :param observation: a named tuple Observation object
         :return: fixed length vector of extracted features about the observation
