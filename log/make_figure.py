@@ -20,10 +20,10 @@ def main():
     plt.figure()
     plt.plot(df.Step, df.Value, 'lightblue')
     plt.plot(df.Step, df.Value.rolling(25).mean(), 'b')
-    plt.xlabel("Gradient descent step")
-    plt.ylabel("Huber Loss")
+    plt.xlabel("Episode")
+    plt.ylabel("Episode Total Return")
 
-    title = "Loss during training"
+    title = "Episode Returns"
     plt.title(title)
 
     plt.savefig(f"{args.output_name}.png")

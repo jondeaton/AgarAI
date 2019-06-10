@@ -27,7 +27,7 @@ class HyperParameters(object):
         self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (4, 1, )
+        self.action_shape = (4, 1, 1)
 
         self.episode_length = 500
         self.num_episodes = 10000
@@ -58,8 +58,8 @@ class HyperParameters(object):
         Overrides attributes of this object with those of "params".
         All attributes of "params" which are also attributes of this object will be set
         to the values found in "params". This is particularly useful for over-riding
-        hyperparamers from command-line arguments
-        :param settings: Object with attributes to override in this object
+        hyper-parameters from command-line arguments
+        :param params: Object with attributes to override in this object
         :return: None
         """
         for attr in vars(params):
@@ -88,21 +88,29 @@ class FullEnvHyperparameters(HyperParameters):
 
         self.env_name = "agario-full-v0"
 
+        # Network parameters
+        self.encoder_type = 'cnn'
+        self.layer_sizes = [16, 16]
+
+        # settings for the "grid" feature extraactor
+        self.extractor_type = "grid"
+        self.ft_extractor_grid_size = 128
+        self.ft_extractor_view_size = 30
+        self.flat_grid_features = False
+
+        self.grid_add_cells = True
+        self.grid_add_viruses = True
+        self.grid_add_others = True
+        self.grid_add_foods = False
+
+
+        # settings for "full" feature extractor
+        # self.extractor_type = "full"
         self.num_pellets_features = 1
         self.num_viruses_features = 0
         self.num_food_features    = 0
         self.num_other_features   = 0
         self.num_cell_features    = 1
-
-        # Network parameters
-        self.encoder_type = 'cnn'
-        self.layer_sizes = [16, 16]
-
-        self.extractor_type = "grid"  # or "full"
-
-        self.ft_extractor_grid_size = 128
-        self.ft_extractor_view_size = 30
-        self.ft_grid_shaped = True
 
 
 class ScreenEnvHyperparameters(HyperParameters):
@@ -112,5 +120,21 @@ class ScreenEnvHyperparameters(HyperParameters):
         self.env_name = "agario-screen-v0"
         self.encoder_type = 'cnn'
         self.screen_len = 128
+
+        self.feature_extractor = None
+
+
+class GridEnvHyperparameters(HyperParameters):
+    def __init__(self):
+        super(GridEnvHyperparameters, self).__init__()
+
+        self.env_name = "agario-grid-v0"
+        self.encoder_type = 'cnn'
+
+        self.grid_size = 128
+        self.observe_pellets = True
+        self.observe_viruses = False
+        self.observe_cells = False
+        self.observe_others = False
 
         self.feature_extractor = None

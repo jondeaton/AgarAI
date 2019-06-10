@@ -5,12 +5,14 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
 import numpy as np
-from gym_agario.envs.AgarioFull import Observation
+from gym_agario.envs.FullEnv import FullObservation
 
 
 class GridFeatureExtractor:
 
-    def __init__(self, view_size, grid_size, arena_size, num_cell=0, grid_shaped=False):
+    def __init__(self, view_size, grid_size, arena_size,
+                 cells=True, others=True, viruses=True, food=False,
+                 flat=False):
         self.view_size = view_size
         self.grid_size = grid_size
 
@@ -18,48 +20,66 @@ class GridFeatureExtractor:
         self.box_size = view_size / grid_size
 
         self.arena_size = arena_size
-        self.num_cell = num_cell
-        self.grid_shaped = grid_shaped
+        self.flat = flat
 
-        if grid_shaped:
-            self.shape = (1, grid_size, grid_size, )
-        else:
-            self.shape = (grid_size * grid_size + 5 * num_cell)
+        self.cells = cells
+        self.viruses = viruses
+        self.others = others
+        self.foods = food
 
-    def __call__(self, observation: Observation):
+        self.depth = 1 + int(cells) + int(others) + int(viruses) + int(food)
+        self.shape = (self.depth, grid_size, grid_size,)
+
+        if flat:
+            self.shape = tuple(np.prod(self.shape))
+
+    def __call__(self, observation: FullObservation):
         return self.extract(observation)
 
-    def extract(self, observation: Observation):
+    def extract(self, observation: FullObservation):
         agent = observation.agent
         loc = position(agent)
         if loc is None: return None  # no player position
 
-        pellet_grid_features = self.get_entity_grid_count(observation.pellets, loc)
-        if self.grid_shaped:
-            return np.expand_dims(pellet_grid_features, 0)
+        features = np.zeros(self.shape)
 
-        large_cells = largest_cells(agent, n=self.num_cell)
-        agent_cell_features = get_entity_features(loc, large_cells, self.num_cell, relative=False)
+        self.add_entities_to_grid(features[0].view(), observation.pellets, loc)
 
-        feature_stacks = [pellet_grid_features, agent_cell_features]
+        i = 1
+        if self.cells:
+            self.add_entities_to_grid(features[i].view(), observation.agent, loc)
+            i += 1
 
-        flattened = list(map(lambda arr: arr.flatten(), feature_stacks))
-        features = np.hstack(flattened)
-        np.nan_to_num(features, copy=False)
+        if self.others:
+            for other in observation.others:
+                self.add_entities_to_grid(features[i].view(), other, loc)
+            i += 1
+
+        if self.viruses:
+            self.add_entities_to_grid(features[i].view(), observation.viruses, loc)
+            i += 1
+
+        if self.foods:
+            self.add_entities_to_grid(features[i].view(), observation.foods, loc)
+            i += 1
+
+        if self.flat:
+            return features.flatten()
+
         return features
 
-    def get_entity_grid_count(self, entities, loc):
-        entity_features = np.zeros((self.grid_size, self.grid_size))
-        self.add_ones(loc, entities, entity_features)
-        self.add_out_of_bounds(loc, entity_features)
-        return entity_features
+    def add_entities_to_grid(self, arr, entities, loc):
+        self.add_ones(loc, entities, arr)
+        self.add_out_of_bounds(loc, arr)
 
     def add_ones(self, loc, entities, entity_features):
         for entity in entities:
             grid_x = int((entity[0] - loc[0]) / self.box_size) + self.grid_size // 2
             grid_y = int((entity[1] - loc[1]) / self.box_size) + self.grid_size // 2
-            if grid_x < self.grid_size and grid_y < self.grid_size and grid_x >= 0 and grid_y >= 0:
-                entity_features[grid_x][grid_y] += 1
+            value = 1 if len(entity) <= 2 else entity[-1]
+
+            if 0 <= grid_x < self.grid_size and 0 <= grid_y < self.grid_size:
+                entity_features[grid_x][grid_y] += value
 
     def add_out_of_bounds(self, loc, entity_features, sentinel_value=-1):
         """ adds sentinel_value to out of bounds locations """
@@ -89,10 +109,10 @@ class FeatureExtractor:
         self.shape = (self.size, )
         self.filler_value = -1000
 
-    def __call__(self, observation: Observation):
+    def __call__(self, observation: FullObservation):
         return self.extract(observation)
 
-    def extract(self, observation: Observation):
+    def extract(self, observation: FullObservation):
         """ extracts features from an observation into a fixed-size feature vector
         :param observation: a named tuple Observation object
         :return: fixed length vector of extracted features about the observation

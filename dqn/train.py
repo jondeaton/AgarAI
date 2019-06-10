@@ -18,7 +18,7 @@ import gym_agario
 from dqn.training import Trainer
 from dqn.qn import DQN, DuelingDQN, StateEncoder, ConvEncoder
 from dqn import HyperParameters
-from dqn.hyperparameters import  FullEnvHyperparameters, ScreenEnvHyperparameters
+from dqn.hyperparameters import FullEnvHyperparameters, ScreenEnvHyperparameters, GridEnvHyperparameters
 
 import torch
 
@@ -52,6 +52,35 @@ def make_q_networks(hyperams: HyperParameters, state_shape):
     return q, target_q
 
 
+def make_environment(env_type, hyperams):
+    """ makes and configures the specified OpenAI gym environment """
+    env_config =  {
+            'frames_per_step': hyperams.frames_per_step,
+            'arena_size':      hyperams.arena_size,
+            'num_pellets':     hyperams.num_pellets,
+            'num_viruses':     hyperams.num_viruses,
+            'num_bots':        hyperams.num_bots,
+            'pellet_regen':    hyperams.pellet_regen,
+        }
+
+    if env_type == "screen":
+        env_config["screen_len"] = hyperams.screen_len
+
+    elif env_type == "grid":
+        env_config.update({
+            "grid_size":       hyperams.grid_size,
+            "observe_cells":   hyperams.observe_cells,
+            "observe_others":  hyperams.observe_others,
+            "observe_viruses": hyperams.observe_viruses,
+            "observe_pellets": hyperams.observe_pellets
+        })
+
+
+    logger.info(f"Creating Agar.io gym environment of type: {hyperams.env_name}")
+    env = gym.make(hyperams.env_name, **env_config)
+    return env
+
+
 def get_feature_extractor(hyperams: HyperParameters):
     """ creates a feature extractor object for the given environment
     :param hyperams: hyper-parameters object
@@ -72,7 +101,11 @@ def get_feature_extractor(hyperams: HyperParameters):
         extractor = GridFeatureExtractor(hyperams.ft_extractor_view_size,
                                          hyperams.ft_extractor_grid_size,
                                          hyperams.arena_size,
-                                         grid_shaped=hyperams.ft_grid_shaped)
+                                         cells=hyperams.grid_add_cells,
+                                         others=hyperams.grid_add_others,
+                                         viruses=hyperams.grid_add_others,
+                                         food=hyperams.grid_add_foods,
+                                         flat=hyperams.flat_grid_features)
 
     elif hyperams.extractor_type == "screen":
         assert isinstance(hyperams, ScreenEnvHyperparameters)
@@ -91,7 +124,15 @@ def get_feature_extractor(hyperams: HyperParameters):
 def main():
     args = parse_args()
 
-    hyperams = FullEnvHyperparameters() if args.env_type == "full" else ScreenEnvHyperparameters()
+    if args.env_type == "full":
+        hyperams = FullEnvHyperparameters()
+    elif args.env_type == "screen":
+        hyperams = ScreenEnvHyperparameters()
+    elif args.env_type == "grid":
+        hyperams = GridEnvHyperparameters()
+    else:
+        raise ValueError(args.env_type)
+
     hyperams.override(args)
 
     output_dir = args.output
@@ -107,22 +148,13 @@ def main():
     logger.debug(f"Saving hyper-parameters to: {hp_file}")
     hyperams.save(hp_file)
 
-    env_config =  {
-            'frames_per_step': hyperams.frames_per_step,
-            'arena_size':      hyperams.arena_size,
-            'num_pellets':     hyperams.num_pellets,
-            'num_viruses':     hyperams.num_viruses,
-            'num_bots':        hyperams.num_bots,
-            'pellet_regen':    hyperams.pellet_regen,
-        }
-    if args.env_type == "screen":
-        env_config["screen_len"] = hyperams.screen_len
-
-    logger.info(f"Creating Agar.io gym environment of type: {hyperams.env_name}")
-    env = gym.make(hyperams.env_name, **env_config)
+    env = make_environment(args.env_type, hyperams)
 
     extractor = get_feature_extractor(hyperams)
-    state_shape = extractor.shape
+    if extractor is not None:
+        state_shape = extractor.shape
+    else:
+        state_shape = env.observation_space.shape
 
     logger.info("Creating Q network...")
     q, target_q = make_q_networks(hyperams, state_shape)
@@ -153,7 +185,7 @@ def parse_args():
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="full", choices=["full", "screen"], dest="env_type",
+    env_options.add_argument("--env", default="full", choices=["full", "screen", "grid"], dest="env_type",
                              help="Environment type")
 
     output_options = parser.add_argument_group("Output")
