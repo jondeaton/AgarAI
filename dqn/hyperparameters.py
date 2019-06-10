@@ -58,8 +58,8 @@ class HyperParameters(object):
         Overrides attributes of this object with those of "params".
         All attributes of "params" which are also attributes of this object will be set
         to the values found in "params". This is particularly useful for over-riding
-        hyperparamers from command-line arguments
-        :param settings: Object with attributes to override in this object
+        hyper-parameters from command-line arguments
+        :param params: Object with attributes to override in this object
         :return: None
         """
         for attr in vars(params):
