@@ -10,13 +10,14 @@ import gym, gym_agario
 
 import a2c
 from a2c.hyperparameters import *
-
+from a2c.Model import ActorCritic
 
 logger = logging.getLogger()
 
+
 def make_environment(env_type, hyperams):
     """ makes and configures the specified OpenAI gym environment """
-    env_config =  {
+    env_config = {
             'frames_per_step': hyperams.frames_per_step,
             'arena_size':      hyperams.arena_size,
             'num_pellets':     hyperams.num_pellets,
@@ -37,7 +38,6 @@ def make_environment(env_type, hyperams):
             "observe_pellets": hyperams.observe_pellets
         })
 
-    logger.info(f"Creating Agar.io gym environment of type: {hyperams.env_name}")
     env = gym.make(hyperams.env_name, **env_config)
     return env
 
@@ -67,11 +67,13 @@ def main():
     logger.debug(f"Saving hyper-parameters to: {hp_file}")
     hyperams.save(hp_file)
 
-    env = make_environment(args.env_type, hyperams)
+    get_env = lambda: make_environment(args.env_type, hyperams)
+    model = ActorCritic()
+    trainer = a2c.Trainer(get_env, model, hyperams)
 
-    trainer = a2c.Trainer(env, hyperams)
+    trainer.train(hyperams.num_episodes)
 
-    trainer.train(25)
+    logger.debug("Exiting.")
 
 
 def get_training_dir(output_dir, name):
@@ -90,17 +92,16 @@ def get_training_dir(output_dir, name):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train DQN Model",
+    parser = argparse.ArgumentParser(description="Train A2C Agent",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="full", choices=["full", "screen", "grid"], dest="env_type",
-                             help="Environment type")
+    env_options.add_argument("--env", default="full", choices=["full", "screen", "grid"],
+                             dest="env_type", help="Environment type")
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")
-    output_options.add_argument("--name", default="dqn",
-                                help="Experiment or run name")
+    output_options.add_argument("--name", default="a2c", help="Experiment or run name")
 
     hyperams_options = parser.add_argument_group("HyperParameters")
     # note: make sure that the "dest" value is exactly the same as the variable name in "Hyperparameters"

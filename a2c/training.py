@@ -45,7 +45,7 @@ class Trainer:
         self.set_seed(hyperams.seed)
 
         self.num_envs = mp.cpu_count()
-        self.envs = Coordinator(self.num_envs, get_env)
+        self.envs = Coordinator(get_env, self.num_envs)
 
     def _critic_loss(self, returns, value):
         mse = kls.mean_squared_error(returns, value)
@@ -106,6 +106,3 @@ class Trainer:
 
     def set_seed(self, seed):
         pass
-
-    def __del__(self):
-        self.envs.close()

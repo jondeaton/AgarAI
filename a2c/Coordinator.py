@@ -9,9 +9,12 @@ Inspired by: https://github.com/MG2033/A2C
 
 import numpy as np
 from enum import Enum
+import logging
 
 import multiprocessing as mp
 from multiprocessing import Pipe, Process
+
+logger = logging.getLogger()
 
 
 class RemoteCommand(Enum):
@@ -20,10 +23,16 @@ class RemoteCommand(Enum):
     close = 3
 
 
-def worker_task(pipe: mp.connection.PipeConnection, get_env):
+def worker_task(pipe, get_env):
     env = get_env()
+
     while True:
-        command, data = pipe.recv()
+        msg = pipe.recv()
+        if type(msg) is tuple:
+            command, data = msg
+        else:
+            command = msg
+
         if command == RemoteCommand.step:
             step_data = env.setp(data)
             pipe.send(step_data)
@@ -51,8 +60,8 @@ class Coordinator:
 
     def step(self, actions):
         for pipe, action in zip(self.pipes, actions):
-            package = RemoteCommand.step, action
-            pipe.send(package)
+            msg = RemoteCommand.step, action
+            pipe.send(msg)
 
         results = [pipe.recv() for pipe in self.pipes]
         obs, rs, dones, infos = zip(*results)
@@ -68,5 +77,9 @@ class Coordinator:
     def close(self):
         for pipe in self.pipes:
             pipe.send(RemoteCommand.close)
+
         for worker in self.workers:
             worker.join()
+
+    def __del__(self):
+        self.close()
