@@ -9,7 +9,7 @@ Inspired by:
     
 """
 
-
+from a2c.Model import ActorCritic
 from a2c.hyperparameters import HyperParameters
 from a2c.Coordinator import Coordinator
 
@@ -28,10 +28,16 @@ from tqdm import tqdm
 
 class Trainer:
 
-    def __init__(self, get_env, model, hyperams: HyperParameters):
+    def __init__(self, get_env, hyperams: HyperParameters):
         self.hyperams = hyperams
 
-        self.model = model
+        self.get_env = get_env
+
+        # self.num_envs = mp.cpu_count()
+        self.num_envs = 1
+        self.envs = None
+
+        self.model = ActorCritic(hyperams.action_shape)
         self.model.compile(optimizer=ko.Adam(lr=hyperams.lr),
                            loss=[self._actor_loss, self._critic_loss])
 
@@ -43,9 +49,6 @@ class Trainer:
         self.save_freq = timedelta(minutes=5)
 
         self.set_seed(hyperams.seed)
-
-        self.num_envs = mp.cpu_count()
-        self.envs = Coordinator(get_env, self.num_envs)
 
     def _critic_loss(self, returns, value):
         mse = kls.mean_squared_error(returns, value)
@@ -65,34 +68,33 @@ class Trainer:
 
     def train(self, num_batches):
 
-        observations = list()
-        actions = list()
-        rewards = list()
-        values = list()
-        dones = list()
+        with Coordinator(self.get_env, self.num_envs) as self.envs:
 
-        all_done = False
+            # make a list for each of the things
+            observations, actions, rewards, values, dones = (list() for _ in range(5))
 
-        for _ in tqdm(range(num_batches)):
+            all_done = False
 
-            obs = self.envs.reset()
-            while not all_done:
-                actions_t, values_t = self.model.action_value(obs)
-                a = actions_t.numpy()
-                obs, rs, done, _ = self.envs.step(a)
-                all_done = all(done)
+            for _ in tqdm(range(num_batches)):
 
-                observations.append(obs)
-                actions.append(a)
-                rewards.append(rs)
-                values.append(values_t.numpy())
-                dones.append(done)
+                obs = self.envs.reset()
 
-                # todo: transpose first two dimensions of these
-                # todo: get advantages/returns
-                acts_and_advs = None
-                returns = None
-                losses = self.model.train_on_batch(observations, [acts_and_advs, returns])
+                while not all_done:
+                    actions_t, values_t = self.model.action_value(obs)
+                    obs, rs, done, _ = self.envs.step(actions_t)
+                    all_done = all(done)
+
+                    observations.append(obs)
+                    actions.append(actions_t)
+                    rewards.append(rs)
+                    values.append(values_t.numpy())
+                    dones.append(done)
+
+                    # todo: transpose first two dimensions of these
+                    # todo: get advantages/returns
+                    acts_and_advs = None
+                    returns = None
+                    losses = self.model.train_on_batch(observations, [acts_and_advs, returns])
 
     def _returns_advantages(self, rewards, dones, values, next_value):
         returns = np.append(np.zeros_like(rewards), next_value, axis=-1)
