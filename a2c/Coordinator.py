@@ -42,7 +42,7 @@ def worker_task(pipe, get_env):
             command = msg
 
         if command == RemoteCommand.step:
-            step_data = env.setp(data)
+            step_data = env.step(data)
             pipe.send(step_data)
         elif command == RemoteCommand.reset:
             ob = env.reset()
@@ -89,14 +89,14 @@ class Coordinator:
 
         results = [pipe.recv() for pipe in self.pipes]
         obs, rs, dones, infos = zip(*results)
-        return np.array(obs), np.array(rs), np.array(dones), infos
+        return obs, rs, dones, infos
 
     def reset(self):
         for pipe in self.pipes:
             pipe.send(RemoteCommand.reset)
 
         obs = [pipe.recv() for pipe in self.pipes]
-        return np.array(obs)
+        return obs
 
     def close(self):
         for pipe in self.pipes:
@@ -112,3 +112,15 @@ class Coordinator:
     def action_space(self):
         self.pipes[0].send(RemoteCommand.action_space)
         return self.pipes[0].recv()
+
+    def send(self, pipe, *args):
+        try:
+            pipe.send(args)
+        except BrokenPipeError:
+            pass
+
+    def recv(self, pipe):
+        try:
+            return pipe.recv()
+        except EOFError:
+            return None
