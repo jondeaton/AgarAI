@@ -7,6 +7,8 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 import json
 import math
 
+from a2c.Model import CNNEncoder, DenseEncoder
+
 
 class HyperParameters(object):
     """ Simple class for storing model hyper-parameters """
@@ -16,8 +18,8 @@ class HyperParameters(object):
 
         # to fill in by sub_classes
         self.env_name = None
-        self.encoder_type = None
-        self.extractor_type = None
+        self.EncoderClass = None
+        self.action_shape = None
 
         # optimizer
         self.learning_rate = 0.0007
@@ -25,23 +27,12 @@ class HyperParameters(object):
 
         # loss
         self.params_value = 1.0
-        self.entropy_weight = 1e-4
+        self.entropy_weight = 0.1
 
         self.num_envs = 16
 
-        # Agario Game parameters
-        self.ticks_per_step = 4  # set equal to 1 => bug
-        self.arena_size = 16
-        self.num_pellets = 1
-        self.num_viruses = 0
-        self.num_bots = 0
-        self.pellet_regen = True
-
-        self.action_shape = (16, 2, 1)
-
-        self.episode_length = 2000
-        self.num_episodes = 64
-        self.gamma = 0.99
+        self.num_episodes = 1024
+        self.gamma = 1.0
 
         self.batch_size = 256
 
@@ -74,16 +65,32 @@ class HyperParameters(object):
         return hp
 
 
-class FullEnvHyperparameters(HyperParameters):
+class CartPoleHyperparameters(HyperParameters):
     def __init__(self):
-        super(FullEnvHyperparameters, self).__init__()
-        self.env_name = "agario-full-v0"
+        super(CartPoleHyperparameters, self).__init__()
+
+        self.env_name = "CartPole-v1"
+        self.EncoderClass = DenseEncoder
+
+        self.num_envs = 128
+        self.learning_rate = 0.05
+        self.action_shape = (2, )
+        self.episode_length = 200
+        self.entropy_weight = 0.1
 
 
-class ScreenEnvHyperparameters(HyperParameters):
+class HalfCheetahHyperparameters(HyperParameters):
     def __init__(self):
-        super(ScreenEnvHyperparameters, self).__init__()
-        self.env_name = "agario-screen-v0"
+        super(HalfCheetahHyperparameters, self).__init__()
+
+        self.env_name = "CartPole-v1"
+        self.EncoderClass = DenseEncoder
+
+        self.num_envs = 8
+        self.learning_rate = 0.05
+        self.action_shape = (6, 2)
+        self.episode_length = 1024
+        self.entropy_weight = 0.1
 
 
 class GridEnvHyperparameters(HyperParameters):
@@ -92,8 +99,22 @@ class GridEnvHyperparameters(HyperParameters):
 
         self.env_name = "agario-grid-v0"
 
+        self.EncoderClass = CNNEncoder
+
+        # Agario Game parameters
+        self.ticks_per_step = 4  # set equal to 1 => bug
+        self.arena_size = 500
+        self.num_pellets = 1000
+        self.num_viruses = 0
+        self.num_bots = 0
+        self.pellet_regen = True
+
+        self.action_shape = (16, 1, 1)
+        self.episode_length = 2048
+
+        # Obervation parameters
         self.num_frames = 1
-        self.grid_size = 5
+        self.grid_size = 64
         self.observe_pellets = True
         self.observe_viruses = False
         self.observe_cells = False

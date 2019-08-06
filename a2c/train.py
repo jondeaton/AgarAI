@@ -7,6 +7,7 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 import os, sys
 import argparse, logging
 import gym, gym_agario
+import numpy as np
 
 import a2c
 from a2c.hyperparameters import *
@@ -16,22 +17,23 @@ logger = logging.getLogger("root")
 logger.propagate = False
 
 
-def make_environment(obs_type, hyperams):
+def make_environment(env_name, hyperams):
     """ makes and configures the specified OpenAI gym environment """
-    env_config = {
-            'difficulty':      'trivial',
-            'ticks_per_step':  hyperams.ticks_per_step,
-            'arena_size':      hyperams.arena_size,
-            'num_pellets':     hyperams.num_pellets,
-            'num_viruses':     hyperams.num_viruses,
-            'num_bots':        hyperams.num_bots,
-            'pellet_regen':    hyperams.pellet_regen,
-        }
 
-    if obs_type == "screen":
-        env_config["screen_len"] = hyperams.screen_len
+    env_config = dict()
 
-    elif obs_type == "grid":
+    if env_name == "agario-grid-v0":
+        env_config = {
+                'difficulty':      'trivial',
+                'ticks_per_step':  hyperams.ticks_per_step,
+                'arena_size':      hyperams.arena_size,
+                'num_pellets':     hyperams.num_pellets,
+                'num_viruses':     hyperams.num_viruses,
+                'num_bots':        hyperams.num_bots,
+                'pellet_regen':    hyperams.pellet_regen,
+            }
+
+        # observation parameters
         env_config.update({
             "grid_size":       hyperams.grid_size,
             "observe_cells":   hyperams.observe_cells,
@@ -40,27 +42,41 @@ def make_environment(obs_type, hyperams):
             "observe_pellets": hyperams.observe_pellets
         })
 
-    env = gym.make(hyperams.env_name, **env_config)
+    env = gym.make(env_name, **env_config)
     return env
 
+
+def agario_to_action(index, action_shape):
+    """ converts a raw action index into an action shape """
+    indices = np.unravel_index(index, action_shape)
+    theta = (2 * np.pi * indices[0]) / action_shape[0]
+    mag = 1 - indices[1] / action_shape[1]
+    act = indices[2]
+    x = np.cos(theta) * mag
+    y = np.sin(theta) * mag
+    return x, y, act
 
 def main():
     args = parse_args()
 
-    if args.obs_type == "full":
-        hyperams = FullEnvHyperparameters()
-    elif args.obs_type == "screen":
-        hyperams = ScreenEnvHyperparameters()
-    elif args.obs_type == "grid":
+    if args.env == "CartPole-v1":
+        hyperams = CartPoleHyperparameters()
+        to_action = lambda index: index
+    elif args.env == "agario-grid-v0":
         hyperams = GridEnvHyperparameters()
+        to_action = lambda i: agario_to_action(i, hyperams.action_shape)
+    elif args.env == "RoboschoolHalfCheetah-v1":
+        hyperams = HalfCheetahHyperparameters()
+        to_action = lambda i: i
+        raise ValueError("HalfCheetah not actually supported")
     else:
-        raise ValueError(args.obs_type)
+        raise ValueError(args.env)
 
     hyperams.override(args)
-    logger.debug(f"Observation type: {args.obs_type}")
+    logger.debug(f"Environment: {args.env}")
 
     if args.debug:
-        logger.warning(f"Debug mode turned on. Model will not be saved")
+        logger.warning(f"Debug mode on. Model will not be saved")
         training_dir = None
     else:
         output_dir = args.output
@@ -74,9 +90,9 @@ def main():
         logger.debug(f"Saving hyper-parameters to: {hp_file}")
         hyperams.save(hp_file)
 
-    get_env = lambda: make_environment(args.obs_type, hyperams)
+    get_env = lambda: make_environment(args.env, hyperams)
 
-    trainer = a2c.Trainer(get_env, hyperams, training_dir=training_dir)
+    trainer = a2c.Trainer(get_env, hyperams, to_action, training_dir=training_dir)
     trainer.train()
 
     logger.debug("Exiting.")
@@ -103,10 +119,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="CartPole-v1")
-    env_options.add_argument("--env", default="grid",
-                             choices=["ram", "full", "screen", "grid"],
-                             dest="obs_type", help="Environment type")
+    env_options.add_argument("--env", default="CartPole-v1",
+                             choices=["CartPole-v1", "agario-grid-v0",
+                                      "RoboschoolHalfCheetah-v1"])
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")

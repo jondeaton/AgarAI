@@ -29,17 +29,17 @@ logger.propagate = False
 
 class Trainer:
 
-    def __init__(self, get_env, hyperams: HyperParameters, training_dir=None):
-        self.hyperams = hyperams
-        self.set_seed(hyperams.seed)
-
+    def __init__(self, get_env, hyperams: HyperParameters, to_action, training_dir=None):
         self.get_env = get_env
+        self.hyperams = hyperams
+        self.to_action = to_action
 
         self.num_envs = hyperams.num_envs
         self.envs = None
 
-        self.model = ActorCritic(hyperams.action_shape)
-        self.model.compile(optimizer=ko.RMSprop(lr=hyperams.learning_rate),
+        self.set_seed(hyperams.seed)
+        self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
+        self.model.compile(optimizer=ko.Adam(lr=hyperams.learning_rate),
                            loss=[self._actor_loss, self._critic_loss])
 
         self.time_steps = 0
@@ -113,43 +113,41 @@ class Trainer:
                 adv_batch = ret_batch - np.squeeze(val_batch)
                 acts_and_advs = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
 
-                self.model.fit(obs_batch, [acts_and_advs, ret_batch],
-                               batch_size=self.hyperams.batch_size,
-                               shuffle=True, epochs=1)
+                self.model.train_on_batch(obs_batch, [acts_and_advs, ret_batch])
 
     def _rollout(self):
 
         rollout = Trainer.Rollout()
         obs = self.envs.reset()
-        done = [False] * self.num_envs
+        dones = [False] * self.num_envs
 
         for _ in tqdm(range(self.hyperams.episode_length)):
             obs_in = np.array(list(filter(lambda o: o is not None, obs)))
-            actions_t, values_t= self.model.action_value(obs_in)
+            actions_t, values_t = self.model.action_value(obs_in)
 
-            actions = [None if d else self.to_action(a) for a, d in zip(actions_t, done)]
+            actions = list()
+            values = list()
+            j = 0
+            for i in range(self.num_envs):
+                if not dones[i]:
+                    actions.append(actions_t[j])
+                    values.append(values_t[j])
+                    j += 1
+                else:
+                    actions.append(None)
+                    values.append(None)
 
-            obs, rs, done, _ = self.envs.step(actions)
+            obs, rs, dones, _ = self.envs.step(actions)
 
             rollout.observations.append(obs)
-            rollout.actions.append(actions_t)
+            rollout.actions.append(actions)
             rollout.rewards.append(rs)
-            rollout.values.append(values_t)
-            rollout.dones.append(done)
+            rollout.values.append(values)
+            rollout.dones.append(dones)
 
-            if all(done): break
+            if all(dones): break
 
         return rollout
-
-    def to_action(self, index):
-        """ converts a raw action index into an action shape """
-        indices = np.unravel_index(index, self.hyperams.action_shape)
-        theta = (2 * np.pi * indices[0]) / self.hyperams.action_shape[0]
-        mag = 1 - indices[1] / self.hyperams.action_shape[1]
-        act = indices[2]
-        x = np.cos(theta) * mag
-        y = np.sin(theta) * mag
-        return x, y, act
 
     def _make_returns(self, reward_batch, gamma):
         returns_batch = list()

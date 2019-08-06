@@ -66,6 +66,8 @@ class Coordinator:
         self.pipes = None
         self.workers = None
 
+        self.dones = [False] * num_workers
+
     def open(self):
         worker_pipes = [Pipe() for _ in range(self.num_workers)]
         self.pipes = [pipe for _, pipe in worker_pipes]
@@ -83,18 +85,33 @@ class Coordinator:
         self.close()
 
     def step(self, actions):
-        for pipe, action in zip(self.pipes, actions):
-            msg = RemoteCommand.step, action
-            pipe.send(msg)
+        for i in range(self.num_workers):
+            if not self.dones[i]:
+                msg = RemoteCommand.step, actions[i]
+                self.pipes[i].send(msg)
 
-        results = [pipe.recv() for pipe in self.pipes]
-        obs, rs, dones, infos = zip(*results)
-        return obs, rs, dones, infos
+        obs = list()
+        rs = list()
+        infos = list()
+        for i in range(self.num_workers):
+            if not self.dones[i]:
+                o, r, done, info = self.pipes[i].recv()
+                obs.append(o)
+                rs.append(r)
+                self.dones[i] = done
+                infos.append(info)
+            else:
+                obs.append(None)
+                rs.append(None)
+                infos.append(None)
+
+        return obs, rs, self.dones.copy(), infos
 
     def reset(self):
         for pipe in self.pipes:
             pipe.send(RemoteCommand.reset)
 
+        self.dones = [False] * self.num_workers
         obs = [pipe.recv() for pipe in self.pipes]
         return obs
 
