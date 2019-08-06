@@ -35,11 +35,11 @@ class Trainer:
 
         self.get_env = get_env
 
-        self.num_envs = 16
+        self.num_envs = hyperams.num_envs
         self.envs = None
 
         self.model = ActorCritic(hyperams.action_shape)
-        self.model.compile(optimizer=ko.Adam(lr=hyperams.lr),
+        self.model.compile(optimizer=ko.RMSprop(lr=hyperams.learning_rate),
                            loss=[self._actor_loss, self._critic_loss])
 
         self.time_steps = 0
@@ -60,7 +60,7 @@ class Trainer:
         return self.hyperams.params_value * mse
 
     def _actor_loss(self, acts_and_advs, logits):
-        actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
+        actions, advantages = tf.split(acts_and_advs, 2, axis=1)
         actions = tf.cast(actions, tf.int32)
 
         weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
@@ -70,11 +70,7 @@ class Trainer:
         entropy_loss = kls.categorical_crossentropy(logits, logits, from_logits=True)
         loss = policy_loss - self.hyperams.entropy_weight * entropy_loss
 
-        # with self.summary_writer.as_default():
-        #     tf.summary.scalar('entropy', entropy_loss)
-
         return loss
-
 
     class Rollout:
         def __init__(self):
@@ -97,30 +93,29 @@ class Trainer:
             to_arr = lambda rollout: np.array(list(filter(lambda x: x is not None, rollout)))
             return list(map(to_arr, transposed))
 
-    def train(self, num_batches):
+    def train(self, num_episodes=None):
         with Coordinator(self.get_env, self.num_envs) as self.envs:
-            for _ in range(num_batches):
+            for _ in range(num_episodes or self.hyperams.num_episodes):
                 rollout = self._rollout()
                 o, a, r, v = rollout.to_batch()
 
                 avg_reward = np.mean([rewards.sum() for rewards in r])
                 std_reward = np.std([rewards.sum() for rewards in r])
-                logger.info(f"Episode returns: {avg_reward} +/- {std_reward}")
+                logger.info(f"Episode returns: {avg_reward:.2f} +/- {std_reward:.2f}")
 
                 returns = self._make_returns(r, self.hyperams.gamma)
 
                 obs_batch = np.concatenate(o)
                 act_batch = np.concatenate(a)
-                # rew_batch = np.concatenate(returns)
                 ret_batch = np.concatenate(returns)
                 val_batch = np.concatenate(v)
 
                 adv_batch = ret_batch - np.squeeze(val_batch)
-                acts_and_advs = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=-1)
+                acts_and_advs = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
 
                 self.model.fit(obs_batch, [acts_and_advs, ret_batch],
                                batch_size=self.hyperams.batch_size,
-                               epochs=1)
+                               shuffle=True, epochs=1)
 
     def _rollout(self):
 
@@ -128,9 +123,9 @@ class Trainer:
         obs = self.envs.reset()
         done = [False] * self.num_envs
 
-        for _ in tqdm(range(1000)):
+        for _ in tqdm(range(self.hyperams.episode_length)):
             obs_in = np.array(list(filter(lambda o: o is not None, obs)))
-            actions_t, values_t = self.model.action_value(obs_in)
+            actions_t, values_t= self.model.action_value(obs_in)
 
             actions = [None if d else self.to_action(a) for a, d in zip(actions_t, done)]
 
@@ -149,7 +144,7 @@ class Trainer:
     def to_action(self, index):
         """ converts a raw action index into an action shape """
         indices = np.unravel_index(index, self.hyperams.action_shape)
-        theta = 2 * np.pi * indices[0] / self.hyperams.action_shape[0]
+        theta = (2 * np.pi * indices[0]) / self.hyperams.action_shape[0]
         mag = 1 - indices[1] / self.hyperams.action_shape[1]
         act = indices[2]
         x = np.cos(theta) * mag
@@ -158,23 +153,15 @@ class Trainer:
 
     def _make_returns(self, reward_batch, gamma):
         returns_batch = list()
+
         for reward_rollout in reward_batch:
             return_rollout = np.zeros_like(reward_rollout)
             return_rollout[-1] = reward_rollout[-1]
             for i in reversed(range(len(reward_rollout) - 1)):
                 return_rollout[i] = reward_rollout[i] + gamma * return_rollout[i + 1]
             returns_batch.append(return_rollout)
-        return returns_batch
 
-    def _returns_advantages(self, rewards, dones, values, next_value):
-        returns = np.append(np.zeros_like(rewards), next_value, axis=-1)
-        # returns are calculated as discounted sum of future rewards
-        for t in reversed(range(rewards.shape[0])):
-            returns[t] = rewards[t] + self.hyperams.gamma * returns[t+1] * (1-dones[t])
-        returns = returns[:-1]
-        # advantages are returns - baseline, value estimates in our case
-        advantages = returns - values
-        return returns, advantages
+        return returns_batch
 
     def set_seed(self, seed):
         pass

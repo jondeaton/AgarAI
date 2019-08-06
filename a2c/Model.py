@@ -18,16 +18,20 @@ class Distribution(tf.keras.Model):
 class ActorCritic(tf.keras.Model):
     def __init__(self, action_shape):
         super(ActorCritic, self).__init__()
-        self.conv1 = kl.Conv2D(4, 8, 4, activation=tf.nn.relu)
-        self.conv2 = kl.Conv2D(4, 8, 4, activation=tf.nn.relu)
+        self.conv1 = kl.Conv2D(2, 3, 1, activation=tf.nn.relu)
+        self.conv2 = kl.Conv2D(2, 3, 1, activation=tf.nn.relu)
 
         self.flatten = kl.Flatten()
         self.dense = kl.Dense(16, activation=tf.nn.relu)
-        self.value_layer = kl.Dense(1, activation=None)
+
+        self.dropout = kl.Dropout(0.1)
+
+        self.value_layer = kl.Dense(1, activation=None, name="value")
 
         self.action_shape = action_shape
         action_size = np.prod(action_shape)
-        self.action_layer = kl.Dense(action_size, activation=None)
+        self.action_layer = kl.Dense(action_size, activation=None,
+                                     name="action")
 
         self.action_distribution = Distribution()
 
@@ -37,6 +41,7 @@ class ActorCritic(tf.keras.Model):
         x = self.conv2(x)
         x = self.flatten(x)
         x = self.dense(x)
+        x = self.dropout(x)
 
         action_param = self.action_layer(x)
         values = self.value_layer(x)

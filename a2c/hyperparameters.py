@@ -14,37 +14,36 @@ class HyperParameters(object):
     def __init__(self):
         self.seed = 42
 
-        # A2C loss terms
-        self.params_value = 0.5
-        self.entropy_weight = 1e-4
-
         # to fill in by sub_classes
         self.env_name = None
         self.encoder_type = None
         self.extractor_type = None
 
+        # optimizer
+        self.learning_rate = 0.0007
+        self.max_gradient_norm = 0.5
+
+        # loss
+        self.params_value = 1.0
+        self.entropy_weight = 1e-4
+
+        self.num_envs = 16
+
         # Agario Game parameters
-        self.frames_per_step = 4
-        self.arena_size = 45
-        self.num_pellets = 30
+        self.ticks_per_step = 4  # set equal to 1 => bug
+        self.arena_size = 16
+        self.num_pellets = 1
         self.num_viruses = 0
         self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (7, 1, 1)
+        self.action_shape = (16, 2, 1)
 
-        self.episode_length = 500
-        self.num_episodes = 10000
-        self.p_dropout = 0.05
+        self.episode_length = 2000
+        self.num_episodes = 64
         self.gamma = 0.99
 
         self.batch_size = 256
-
-        # Adam Optimization parameters
-        self.lr = 0.0001
-        self.adam_betas = (0.9, 0.999)
-        self.adam_eps = 1e-8
-        self.grad_clip_norm = 1
 
     def override(self, params):
         """
@@ -78,43 +77,13 @@ class HyperParameters(object):
 class FullEnvHyperparameters(HyperParameters):
     def __init__(self):
         super(FullEnvHyperparameters, self).__init__()
-
         self.env_name = "agario-full-v0"
-
-        # Network parameters
-        self.encoder_type = 'cnn'
-        self.layer_sizes = [16, 16]
-
-        # settings for the "grid" feature extraactor
-        self.extractor_type = "grid"
-        self.ft_extractor_grid_size = 128
-        self.ft_extractor_view_size = 30
-        self.flat_grid_features = False
-
-        self.grid_add_cells = True
-        self.grid_add_viruses = True
-        self.grid_add_others = True
-        self.grid_add_foods = False
-
-
-        # settings for "full" feature extractor
-        # self.extractor_type = "full"
-        self.num_pellets_features = 1
-        self.num_viruses_features = 0
-        self.num_food_features    = 0
-        self.num_other_features   = 0
-        self.num_cell_features    = 1
 
 
 class ScreenEnvHyperparameters(HyperParameters):
     def __init__(self):
         super(ScreenEnvHyperparameters, self).__init__()
-
         self.env_name = "agario-screen-v0"
-        self.encoder_type = 'cnn'
-        self.screen_len = 128
-
-        self.feature_extractor = None
 
 
 class GridEnvHyperparameters(HyperParameters):
@@ -122,9 +91,9 @@ class GridEnvHyperparameters(HyperParameters):
         super(GridEnvHyperparameters, self).__init__()
 
         self.env_name = "agario-grid-v0"
-        self.encoder_type = 'cnn'
 
-        self.grid_size = 128
+        self.num_frames = 1
+        self.grid_size = 5
         self.observe_pellets = True
         self.observe_viruses = False
         self.observe_cells = False

@@ -19,13 +19,13 @@ logger.propagate = False
 def make_environment(obs_type, hyperams):
     """ makes and configures the specified OpenAI gym environment """
     env_config = {
-            'difficulty': 'trivial',
-            # 'frames_per_step': hyperams.frames_per_step,
-            # 'arena_size':      hyperams.arena_size,
-            # 'num_pellets':     hyperams.num_pellets,
-            # 'num_viruses':     hyperams.num_viruses,
-            # 'num_bots':        hyperams.num_bots,
-            # 'pellet_regen':    hyperams.pellet_regen,
+            'difficulty':      'trivial',
+            'ticks_per_step':  hyperams.ticks_per_step,
+            'arena_size':      hyperams.arena_size,
+            'num_pellets':     hyperams.num_pellets,
+            'num_viruses':     hyperams.num_viruses,
+            'num_bots':        hyperams.num_bots,
+            'pellet_regen':    hyperams.pellet_regen,
         }
 
     if obs_type == "screen":
@@ -57,7 +57,6 @@ def main():
         raise ValueError(args.obs_type)
 
     hyperams.override(args)
-    
     logger.debug(f"Observation type: {args.obs_type}")
 
     if args.debug:
@@ -78,7 +77,7 @@ def main():
     get_env = lambda: make_environment(args.obs_type, hyperams)
 
     trainer = a2c.Trainer(get_env, hyperams, training_dir=training_dir)
-    trainer.train(hyperams.num_episodes)
+    trainer.train()
 
     logger.debug("Exiting.")
 
@@ -104,7 +103,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="grid", choices=["ram", "full", "screen", "grid"],
+    env_options.add_argument("--env", default="CartPole-v1")
+    env_options.add_argument("--env", default="grid",
+                             choices=["ram", "full", "screen", "grid"],
                              dest="obs_type", help="Environment type")
 
     output_options = parser.add_argument_group("Output")
@@ -113,8 +114,8 @@ def parse_args():
     output_options.add_argument("--debug", action="store_true", help="Debug mode")
 
     hyperams_options = parser.add_argument_group("HyperParameters")
-    # note: make sure that the "dest" value is exactly the same as the variable name in "Hyperparameters"
-    # in order for over-riding to work correctly.
+    # note: make sure that the "dest" value is exactly the same as the 
+    # variable name in "Hyperparameters" in order for over-riding to work correctly.
     hyperams_options.add_argument("-episodes", "--episodes", dest="num_episodes", type=int,
                                   help="Number of epochs to train")
 
