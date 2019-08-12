@@ -85,6 +85,7 @@ class Coordinator:
         self.close()
 
     def step(self, actions):
+        actions = list(actions)
         for i in range(self.num_workers):
             if not self.dones[i]:
                 msg = RemoteCommand.step, actions[i]

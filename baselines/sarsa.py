@@ -16,18 +16,12 @@ logger = logging.getLogger("root")
 
 
 def to_obs(s: np.ndarray) -> np.ndarray:
-    theta = s[2]
-    theta_dot = s[3]
+    x, dx, t, dt = s
+    v = np.array([x, dx, t, dt, np.sin(t), np.cos(t), np.sin(dt), np.cos(dt)])
+    return np.concatenate(v, np.outer(v, v).reshape(-1))
 
-    y = np.sin(theta)
-    x = np.cos(theta)
-    dy = np.sin(theta_dot)
-    dx = np.cos(theta_dot)
 
-    o = np.append(s, [x, y, dx, dy])
-    return np.append(o, np.outer(o, o).reshape(-1))
-
-def evaluate(w, N=1000):
+def evaluate(pi, N=1000):
     returns = np.zeros(N)
     
     env = gym.make("CartPole-v1")
@@ -37,7 +31,7 @@ def evaluate(w, N=1000):
         G = 0
         while not done:
             o = to_obs(s)
-            a = np.argmax(np.matmul(w, o))
+            a = pi(o)
             s, r, done, _ = env.step(a)
             G += r
         returns[ep] = G
@@ -57,10 +51,11 @@ def main():
     state_n,  = env.observation_space.shape
     action_n = env.action_space.n
 
-    obs_n = ((state_n + 4) + 1) * (state_n + 4)
+    obs_n = 8 + 8 * 8
 
     w_shape = (action_n, obs_n)
-    w = np.random.randn(np.prod(w_shape)).reshape(w_shape)
+    w = np.zeros(w_shape)
+    #w = np.random.randn(np.prod(w_shape)).reshape(w_shape)
     eps_base = 0.5
     lr_base = 0.00025
 
@@ -101,7 +96,7 @@ def main():
 
         # lambda: 0 => one-step SARSA (more bias, less variance)
         # lambda: 1 => Monte Carlo (less bias, more variance)
-        lambd = 0.01
+        lambd = 0.95
 
         H = len(actions)
         qs = np.zeros(H)
@@ -122,12 +117,14 @@ def main():
             a = actions[t]
             s = states[t]
             Qsa = np.matmul(w, s)[a]
-            w[a] += lr * (q_l[t] - Qsa) * s
+            w[a] += lr * ( (q_l[t] - Qsa) * s - 0.002 * w[a])
 
-    evaluate(w)
+    pi = lambda o: np.argmax(np.matmul(w, o))
+    evaluate(pi)
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train Q-Learning Agent")
+    parser = argparse.ArgumentParser(description="Train SARSA Agent")
 
     env_options = parser.add_argument_group("Environment")
     env_options.add_argument("--env", default="CartPole-v1",

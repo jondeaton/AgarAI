@@ -19,6 +19,7 @@ from tqdm import tqdm
 import multiprocessing as mp
 
 import numpy as np
+
 import tensorflow as tf
 import tensorflow.keras.losses as kls
 import tensorflow.keras.optimizers as ko
@@ -39,7 +40,7 @@ class Trainer:
 
         self.set_seed(hyperams.seed)
         self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
-        self.model.compile(optimizer=ko.Adam(lr=hyperams.learning_rate),
+        self.model.compile(optimizer=ko.Adam(lr=hyperams.learning_rate, clipnorm=1),
                            loss=[self._actor_loss, self._critic_loss])
 
         self.time_steps = 0
@@ -56,8 +57,7 @@ class Trainer:
                                                               histogram_freq=1)
 
     def _critic_loss(self, returns, value):
-        mse = kls.mean_squared_error(returns, value)
-        return self.hyperams.params_value * mse
+        return kls.mean_squared_error(returns, value)
 
     def _actor_loss(self, acts_and_advs, logits):
         actions, advantages = tf.split(acts_and_advs, 2, axis=1)
@@ -68,9 +68,7 @@ class Trainer:
 
         # entropy loss can be calculated via CE over itself
         entropy_loss = kls.categorical_crossentropy(logits, logits, from_logits=True)
-        loss = policy_loss - self.hyperams.entropy_weight * entropy_loss
-
-        return loss
+        return policy_loss - self.hyperams.entropy_weight * entropy_loss
 
     class Rollout:
         def __init__(self):
@@ -113,7 +111,11 @@ class Trainer:
                 adv_batch = ret_batch - np.squeeze(val_batch)
                 acts_and_advs = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
 
-                self.model.train_on_batch(obs_batch, [acts_and_advs, ret_batch])
+                self.model.fit(obs_batch, [acts_and_advs, ret_batch],
+                               shuffle=True,
+                               batch_size=self.hyperams.batch_size)
+
+                # self.model.train_on_batch(obs_batch, [acts_and_advs, ret_batch])
 
     def _rollout(self):
 
@@ -137,7 +139,7 @@ class Trainer:
                     actions.append(None)
                     values.append(None)
 
-            obs, rs, dones, _ = self.envs.step(actions)
+            obs, rs, dones, _ = self.envs.step(map(self.to_action, actions))
 
             rollout.observations.append(obs)
             rollout.actions.append(actions)

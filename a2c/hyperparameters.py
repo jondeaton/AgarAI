@@ -21,20 +21,15 @@ class HyperParameters(object):
         self.EncoderClass = None
         self.action_shape = None
 
+        self.num_envs = 4
+
         # optimizer
-        self.learning_rate = 0.0007
-        self.max_gradient_norm = 0.5
+        self.learning_rate = None
 
-        # loss
-        self.params_value = 1.0
-        self.entropy_weight = 0.1
-
-        self.num_envs = 16
-
-        self.num_episodes = 1024
-        self.gamma = 1.0
-
-        self.batch_size = 256
+        self.gamma = None
+        self.entropy_weight = None
+        self.action_shape = None
+        self.batch_size = None
 
     def override(self, params):
         """
@@ -75,8 +70,8 @@ class CartPoleHyperparameters(HyperParameters):
         self.num_envs = 128
         self.learning_rate = 0.05
         self.action_shape = (2, )
-        self.episode_length = 200
-        self.entropy_weight = 0.1
+        self.episode_length = 500
+        self.entropy_weight = 1e-4
 
 
 class HalfCheetahHyperparameters(HyperParameters):
@@ -87,8 +82,8 @@ class HalfCheetahHyperparameters(HyperParameters):
         self.EncoderClass = DenseEncoder
 
         self.num_envs = 8
-        self.learning_rate = 0.05
-        self.action_shape = (6, 2)
+        self.learning_rate = 0.001
+        self.action_shape = (7, )
         self.episode_length = 1024
         self.entropy_weight = 0.1
 
@@ -101,6 +96,18 @@ class GridEnvHyperparameters(HyperParameters):
 
         self.EncoderClass = CNNEncoder
 
+        self.learning_rate = 0.001
+        self.num_episodes = 128
+        self.gamma = 0.95
+        self.batch_size = 256
+
+        self.num_envs = 4
+
+        self.entropy_weight = 1e-4
+
+        self.action_shape = (16, 1, 1)
+        self.episode_length = 1024
+
         # Agario Game parameters
         self.ticks_per_step = 4  # set equal to 1 => bug
         self.arena_size = 500
@@ -109,15 +116,11 @@ class GridEnvHyperparameters(HyperParameters):
         self.num_bots = 0
         self.pellet_regen = True
 
-        self.action_shape = (16, 1, 1)
-        self.episode_length = 2048
-
-        # Obervation parameters
+        # observation parameters
         self.num_frames = 1
-        self.grid_size = 64
+        self.grid_size = 16
         self.observe_pellets = True
         self.observe_viruses = False
-        self.observe_cells = False
-        self.observe_others = False
+        self.observe_cells   = False
+        self.observe_others  = False
 
-        self.feature_extractor = None
