@@ -109,18 +109,19 @@ class GridEnvHyperparameters(HyperParameters):
         self.episode_length = 1024
 
         # Agario Game parameters
+        self.difficulty = "normal"
         self.ticks_per_step = 4  # set equal to 1 => bug
         self.arena_size = 500
         self.num_pellets = 1000
-        self.num_viruses = 0
-        self.num_bots = 0
+        self.num_viruses = 25
+        self.num_bots = 25
         self.pellet_regen = True
 
         # observation parameters
         self.num_frames = 1
         self.grid_size = 16
         self.observe_pellets = True
-        self.observe_viruses = False
-        self.observe_cells   = False
-        self.observe_others  = False
+        self.observe_viruses = True
+        self.observe_cells   = True
+        self.observe_others  = True
 

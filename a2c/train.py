@@ -24,7 +24,7 @@ def make_environment(env_name, hyperams):
 
     if env_name == "agario-grid-v0":
         env_config = {
-                'difficulty':      'trivial',
+                'difficulty':      hyperams.difficulty,
                 'ticks_per_step':  hyperams.ticks_per_step,
                 'arena_size':      hyperams.arena_size,
                 'num_pellets':     hyperams.num_pellets,
@@ -48,6 +48,8 @@ def make_environment(env_name, hyperams):
 
 def agario_to_action(index, action_shape):
     """ converts a raw action index into an action shape """
+    if index is None:
+        return None
     indices = np.unravel_index(index, action_shape)
     theta = (2 * np.pi * indices[0]) / action_shape[0]
     mag = 1 - indices[1] / action_shape[1]

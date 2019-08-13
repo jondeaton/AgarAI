@@ -9,6 +9,15 @@ Inspired by:
     
 """
 
+def is_None(x):
+    return x is None
+
+def is_not_None(x):
+    return x is not None
+
+def none_filter(l):
+    return filter(is_not_None, l)
+
 from a2c.Model import ActorCritic
 from a2c.hyperparameters import HyperParameters
 from a2c.Coordinator import Coordinator
@@ -76,7 +85,12 @@ class Trainer:
             self.actions = list()
             self.rewards = list()
             self.values = list()
-            self.dones = list()
+
+        def record(self, observations, actions, rewards, values):
+            self.observations.append(observations)
+            self.actions.append(actions)
+            self.rewards.append(rewards)
+            self.values.append(values)
 
         def to_batch(self):
             obs_batch = self.tranpose_batch(self.observations)
@@ -88,43 +102,41 @@ class Trainer:
         @staticmethod
         def tranpose_batch(collection):
             transposed = zip(*collection)
-            to_arr = lambda rollout: np.array(list(filter(lambda x: x is not None, rollout)))
+            to_arr = lambda rollout: np.array(list(none_filter(rollout)))
             return list(map(to_arr, transposed))
 
     def train(self, num_episodes=None):
         with Coordinator(self.get_env, self.num_envs) as self.envs:
             for _ in range(num_episodes or self.hyperams.num_episodes):
-                rollout = self._rollout()
-                o, a, r, v = rollout.to_batch()
+
+                rollout = self.rollout_(self.hyperams.episode_length)
+                observations, actions, r, values = rollout.to_batch()
 
                 avg_reward = np.mean([rewards.sum() for rewards in r])
                 std_reward = np.std([rewards.sum() for rewards in r])
                 logger.info(f"Episode returns: {avg_reward:.2f} +/- {std_reward:.2f}")
 
-                returns = self._make_returns(r, self.hyperams.gamma)
+                returns = self.make_returns(r, self.hyperams.gamma)
 
-                obs_batch = np.concatenate(o)
-                act_batch = np.concatenate(a)
+                obs_batch = np.concatenate(observations)
+                act_batch = np.concatenate(actions)
                 ret_batch = np.concatenate(returns)
-                val_batch = np.concatenate(v)
+                val_batch = np.concatenate(values)
 
                 adv_batch = ret_batch - np.squeeze(val_batch)
-                acts_and_advs = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
+                act_adv_batch = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
 
-                self.model.fit(obs_batch, [acts_and_advs, ret_batch],
-                               shuffle=True,
-                               batch_size=self.hyperams.batch_size)
+                self.model.fit(obs_batch, [act_adv_batch, ret_batch],
+                               shuffle=True, batch_size=self.hyperams.batch_size)
 
-                # self.model.train_on_batch(obs_batch, [acts_and_advs, ret_batch])
-
-    def _rollout(self):
-
+    def rollout_(self, episode_length):
         rollout = Trainer.Rollout()
-        obs = self.envs.reset()
-        dones = [False] * self.num_envs
 
-        for _ in tqdm(range(self.hyperams.episode_length)):
-            obs_in = np.array(list(filter(lambda o: o is not None, obs)))
+        observations = self.envs.reset()
+
+        dones = [False] * self.num_envs
+        for _ in tqdm(range(episode_length)):
+            obs_in = np.array(list(filter(is_not_None, observations)))
             actions_t, values_t = self.model.action_value(obs_in)
 
             actions = list()
@@ -139,19 +151,15 @@ class Trainer:
                     actions.append(None)
                     values.append(None)
 
-            obs, rs, dones, _ = self.envs.step(map(self.to_action, actions))
-
-            rollout.observations.append(obs)
-            rollout.actions.append(actions)
-            rollout.rewards.append(rs)
-            rollout.values.append(values)
-            rollout.dones.append(dones)
-
+            next_observations, rewards, dones, _ = self.envs.step(map(self.to_action, actions))
+            rollout.record(observations, actions, rewards, values)
+            observations = next_observations
             if all(dones): break
 
         return rollout
 
-    def _make_returns(self, reward_batch, gamma):
+    @staticmethod
+    def make_returns(reward_batch, gamma):
         returns_batch = list()
 
         for reward_rollout in reward_batch:
@@ -164,4 +172,4 @@ class Trainer:
         return returns_batch
 
     def set_seed(self, seed):
-        pass
+        pass # todo :(
