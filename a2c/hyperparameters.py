@@ -74,20 +74,6 @@ class CartPoleHyperparameters(HyperParameters):
         self.entropy_weight = 1e-4
 
 
-class HalfCheetahHyperparameters(HyperParameters):
-    def __init__(self):
-        super(HalfCheetahHyperparameters, self).__init__()
-
-        self.env_name = "CartPole-v1"
-        self.EncoderClass = DenseEncoder
-
-        self.num_envs = 8
-        self.learning_rate = 0.001
-        self.action_shape = (7, )
-        self.episode_length = 1024
-        self.entropy_weight = 0.1
-
-
 class GridEnvHyperparameters(HyperParameters):
     def __init__(self):
         super(GridEnvHyperparameters, self).__init__()
@@ -96,7 +82,7 @@ class GridEnvHyperparameters(HyperParameters):
 
         self.EncoderClass = CNNEncoder
 
-        self.learning_rate = 0.001
+        self.learning_rate = 0.0001
         self.num_episodes = 128
         self.gamma = 0.95
         self.batch_size = 256
@@ -105,21 +91,22 @@ class GridEnvHyperparameters(HyperParameters):
 
         self.entropy_weight = 1e-4
 
-        self.action_shape = (16, 1, 1)
+        self.action_shape = (16, 2, 2)
         self.episode_length = 1024
 
         # Agario Game parameters
         self.difficulty = "normal"
+        self.agents_per_env = 32
         self.ticks_per_step = 4  # set equal to 1 => bug
         self.arena_size = 500
         self.num_pellets = 1000
         self.num_viruses = 25
-        self.num_bots = 25
+        self.num_bots = 0
         self.pellet_regen = True
 
         # observation parameters
         self.num_frames = 1
-        self.grid_size = 16
+        self.grid_size = 32
         self.observe_pellets = True
         self.observe_viruses = True
         self.observe_cells   = True

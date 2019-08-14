@@ -24,6 +24,7 @@ def make_environment(env_name, hyperams):
 
     if env_name == "agario-grid-v0":
         env_config = {
+                'num_agents':      hyperams.agents_per_env,
                 'difficulty':      hyperams.difficulty,
                 'ticks_per_step':  hyperams.ticks_per_step,
                 'arena_size':      hyperams.arena_size,
@@ -56,7 +57,7 @@ def agario_to_action(index, action_shape):
     act = indices[2]
     x = np.cos(theta) * mag
     y = np.sin(theta) * mag
-    return x, y, act
+    return np.array([x, y]), act
 
 def main():
     args = parse_args()

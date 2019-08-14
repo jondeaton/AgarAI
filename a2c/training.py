@@ -45,7 +45,9 @@ class Trainer:
         self.to_action = to_action
 
         self.num_envs = hyperams.num_envs
-        self.envs = None
+        # self.envs = None
+
+        self.env = get_env()
 
         self.set_seed(hyperams.seed)
         self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
@@ -106,35 +108,39 @@ class Trainer:
             return list(map(to_arr, transposed))
 
     def train(self, num_episodes=None):
-        with Coordinator(self.get_env, self.num_envs) as self.envs:
-            for _ in range(num_episodes or self.hyperams.num_episodes):
+        # with Coordinator(self.get_env, self.num_envs) as self.envs:
+        for _ in range(num_episodes or self.hyperams.num_episodes):
+            self.rollout_train()
 
-                rollout = self.rollout_(self.hyperams.episode_length)
-                observations, actions, r, values = rollout.to_batch()
+    def rollout_train(self):
+        rollout = self.rollout_(self.hyperams.episode_length)
+        observations, actions, r, values = rollout.to_batch()
 
-                avg_reward = np.mean([rewards.sum() for rewards in r])
-                std_reward = np.std([rewards.sum() for rewards in r])
-                logger.info(f"Episode returns: {avg_reward:.2f} +/- {std_reward:.2f}")
+        avg_reward = np.mean([rewards.sum() for rewards in r])
+        std_reward = np.std([rewards.sum() for rewards in r])
+        logger.info(f"Episode returns: {avg_reward:.2f} +/- {std_reward:.2f}")
 
-                returns = self.make_returns(r, self.hyperams.gamma)
+        returns = self.make_returns(r, self.hyperams.gamma)
 
-                obs_batch = np.concatenate(observations)
-                act_batch = np.concatenate(actions)
-                ret_batch = np.concatenate(returns)
-                val_batch = np.concatenate(values)
+        obs_batch = np.concatenate(observations)
+        act_batch = np.concatenate(actions)
+        ret_batch = np.concatenate(returns)
+        val_batch = np.concatenate(values)
 
-                adv_batch = ret_batch - np.squeeze(val_batch)
-                act_adv_batch = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
+        adv_batch = ret_batch - np.squeeze(val_batch)
+        act_adv_batch = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
 
-                self.model.fit(obs_batch, [act_adv_batch, ret_batch],
-                               shuffle=True, batch_size=self.hyperams.batch_size)
+        self.model.fit(obs_batch, [act_adv_batch, ret_batch],
+                       shuffle=True, batch_size=self.hyperams.batch_size)
+
 
     def rollout_(self, episode_length):
+        # performs a rollout and trains the model on it
         rollout = Trainer.Rollout()
 
-        observations = self.envs.reset()
+        observations = self.env.reset()
 
-        dones = [False] * self.num_envs
+        dones = [False] * self.hyperams.agents_per_env
         for _ in tqdm(range(episode_length)):
             obs_in = np.array(list(filter(is_not_None, observations)))
             actions_t, values_t = self.model.action_value(obs_in)
@@ -142,7 +148,7 @@ class Trainer:
             actions = list()
             values = list()
             j = 0
-            for i in range(self.num_envs):
+            for i in range(self.hyperams.agents_per_env):
                 if not dones[i]:
                     actions.append(actions_t[j])
                     values.append(values_t[j])
@@ -151,7 +157,8 @@ class Trainer:
                     actions.append(None)
                     values.append(None)
 
-            next_observations, rewards, dones, _ = self.envs.step(map(self.to_action, actions))
+            next_observations, rewards, dones, _ = self.env.step(list(map(self.to_action, actions)))
+
             rollout.record(observations, actions, rewards, values)
             observations = next_observations
             if all(dones): break
