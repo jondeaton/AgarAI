@@ -65,3 +65,8 @@ class ActorCritic(tf.keras.Model):
         logits, value = self.predict(state)
         action = tf.random.categorical(logits, 1)
         return tf.squeeze(action, axis=-1), np.squeeze(value, axis=1)
+
+    def action(self, state):
+        logits, _ = self.predict(state)
+        action = tf.random.categorical(logits, 1)
+        return tf.squeeze(action, axis=-1)

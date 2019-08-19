@@ -1,7 +1,7 @@
 """
 File: training
 Date: 2019-07-25 
-Author: Jon Deaton (jdeaton@stanford.edu)
+Author: Jon Deaton (jonpauldeaton@gmail.com)
 
 Inspired by:
     - http://inoryy.com/post/tensorflow2-deep-reinforcement-learning/
@@ -9,23 +9,14 @@ Inspired by:
     
 """
 
-def is_None(x):
-    return x is None
-
-def is_not_None(x):
-    return x is not None
-
-def none_filter(l):
-    return filter(is_not_None, l)
-
 from a2c.Model import ActorCritic
 from a2c.hyperparameters import HyperParameters
 from a2c.Coordinator import Coordinator
+from utils import *
 
 import logging
 from datetime import datetime, timedelta
 from tqdm import tqdm
-import multiprocessing as mp
 
 import numpy as np
 
@@ -36,13 +27,15 @@ import tensorflow.keras.optimizers as ko
 logger = logging.getLogger("root")
 logger.propagate = False
 
-
 class Trainer:
 
-    def __init__(self, get_env, hyperams: HyperParameters, to_action, training_dir=None):
+    def __init__(self, get_env, hyperams: HyperParameters, to_action,
+                 test_env=None,
+                 training_dir=None):
         self.get_env = get_env
         self.hyperams = hyperams
         self.to_action = to_action
+        self.test_env = test_env
 
         self.num_envs = hyperams.num_envs
         # self.envs = None
@@ -109,19 +102,26 @@ class Trainer:
 
     def train(self, num_episodes=None):
         # with Coordinator(self.get_env, self.num_envs) as self.envs:
-        for _ in range(num_episodes or self.hyperams.num_episodes):
-            self.rollout_train()
 
-    def rollout_train(self):
-        rollout = self.rollout_(self.hyperams.episode_length)
-        observations, actions, r, values = rollout.to_batch()
+        self.test()  # begin with benchmark
 
-        avg_reward = np.mean([rewards.sum() for rewards in r])
-        std_reward = np.std([rewards.sum() for rewards in r])
-        logger.info(f"Episode returns: {avg_reward:.2f} +/- {std_reward:.2f}")
+        num_episodes = num_episodes or self.hyperams.num_episodes
+        for ep in range(num_episodes):
+            self.rollout_train(ep)
 
-        returns = self.make_returns(r, self.hyperams.gamma)
+            if ep and ep % 10 == 0:
+                self.test()
 
+    def rollout_train(self, episode):
+        rollout = self.rollout_(episode, self.hyperams.episode_length)
+        observations, actions, rewards, values = rollout.to_batch()
+
+        Gs = np.array([rs.sum() for rs in rewards])
+        print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
+
+        returns = self.make_returns(rewards, self.hyperams.gamma)
+
+        # flatten list of lists into single batch
         obs_batch = np.concatenate(observations)
         act_batch = np.concatenate(actions)
         ret_batch = np.concatenate(returns)
@@ -130,38 +130,39 @@ class Trainer:
         adv_batch = ret_batch - np.squeeze(val_batch)
         act_adv_batch = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
 
+        n, *_ = obs_batch.shape
+
         self.model.fit(obs_batch, [act_adv_batch, ret_batch],
                        shuffle=True, batch_size=self.hyperams.batch_size)
 
-
-    def rollout_(self, episode_length):
+    def rollout_(self, episode, episode_length):
         # performs a rollout and trains the model on it
         rollout = Trainer.Rollout()
 
         observations = self.env.reset()
 
         dones = [False] * self.hyperams.agents_per_env
-        for _ in tqdm(range(episode_length)):
-            obs_in = np.array(list(filter(is_not_None, observations)))
-            actions_t, values_t = self.model.action_value(obs_in)
+        for t in tqdm(range(episode_length), desc=f"Episode {episode}"):
+            if not all(dones):
+                obs_in = np.array(list(filter(is_not_None, observations)))
+                actions_t, values_t = self.model.action_value(obs_in)
 
-            actions = list()
-            values = list()
-            j = 0
-            for i in range(self.hyperams.agents_per_env):
-                if not dones[i]:
-                    actions.append(actions_t[j])
-                    values.append(values_t[j])
-                    j += 1
-                else:
-                    actions.append(None)
-                    values.append(None)
+                actions = list()
+                values = list()
+                j = 0
+                for i in range(self.hyperams.agents_per_env):
+                    if not dones[i]:
+                        actions.append(actions_t[j])
+                        values.append(values_t[j])
+                        j += 1
+                    else:
+                        actions.append(None)
+                        values.append(None)
 
-            next_observations, rewards, dones, _ = self.env.step(list(map(self.to_action, actions)))
+                next_observations, rewards, dones, _ = self.env.step(list(map(self.to_action, actions)))
 
-            rollout.record(observations, actions, rewards, values)
-            observations = next_observations
-            if all(dones): break
+                rollout.record(observations, actions, rewards, values)
+                observations = next_observations
 
         return rollout
 
@@ -178,5 +179,26 @@ class Trainer:
 
         return returns_batch
 
+    def test(self):
+        logger.info(f"Testing performance...")
+        o = self.test_env.reset()
+        rewards = list()
+        done = False
+        for t in tqdm(range(self.hyperams.episode_length)):
+            if not done:
+                a = self.model.action(np.expand_dims(o, axis=0))
+                o, r, done, _ = self.test_env.step(self.to_action(a))
+                rewards.append(r)
+
+        episode_len = len(rewards)
+        rewards = np.array(rewards)
+        G = rewards.sum()
+        mass = rewards.cumsum() + 10
+
+        pellet_density = self.hyperams.num_pellets / pow(self.hyperams.arena_size, 2)
+        efficiency = G / (episode_len * pellet_density)
+
+        print(f"Return: {G:.0f}, max mass: {mass.max():.0f}, avg. mass: {mass.mean():.1f}, efficiency: {efficiency:.1f}")
+
     def set_seed(self, seed):
-        pass # todo :(
+        self.env.seed(seed)

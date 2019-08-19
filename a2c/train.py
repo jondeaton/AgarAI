@@ -11,10 +11,28 @@ import numpy as np
 
 import a2c
 from a2c.hyperparameters import *
-from a2c.Model import ActorCritic
 
 logger = logging.getLogger("root")
 logger.propagate = False
+
+
+def make_test_env(env_name, hyperams):
+    return gym.make(env_name, **{
+        'num_agents': 1,
+        'difficulty': 'normal',
+        'ticks_per_step': hyperams.ticks_per_step,
+        'arena_size': 500,
+        'num_pellets': 1000,
+        'num_viruses': 25,
+        'num_bots': 25,
+        'pellet_regen': True,
+
+        "grid_size": hyperams.grid_size,
+        "observe_cells": hyperams.observe_cells,
+        "observe_others": hyperams.observe_others,
+        "observe_viruses": hyperams.observe_viruses,
+        "observe_pellets": hyperams.observe_pellets
+    })
 
 
 def make_environment(env_name, hyperams):
@@ -51,10 +69,12 @@ def agario_to_action(index, action_shape):
     """ converts a raw action index into an action shape """
     if index is None:
         return None
+    if type(index) is not int:
+        index = int(index)
     indices = np.unravel_index(index, action_shape)
     theta = (2 * np.pi * indices[0]) / action_shape[0]
     mag = 1 - indices[1] / action_shape[1]
-    act = indices[2]
+    act = int(indices[2])
     x = np.cos(theta) * mag
     y = np.sin(theta) * mag
     return np.array([x, y]), act
@@ -68,10 +88,6 @@ def main():
     elif args.env == "agario-grid-v0":
         hyperams = GridEnvHyperparameters()
         to_action = lambda i: agario_to_action(i, hyperams.action_shape)
-    elif args.env == "RoboschoolHalfCheetah-v1":
-        hyperams = HalfCheetahHyperparameters()
-        to_action = lambda i: i
-        raise ValueError("HalfCheetah not actually supported")
     else:
         raise ValueError(args.env)
 
@@ -95,7 +111,9 @@ def main():
 
     get_env = lambda: make_environment(args.env, hyperams)
 
-    trainer = a2c.Trainer(get_env, hyperams, to_action, training_dir=training_dir)
+    trainer = a2c.Trainer(get_env, hyperams, to_action,
+                          test_env=make_test_env(args.env, hyperams),
+                          training_dir=training_dir)
     trainer.train()
 
     logger.debug("Exiting.")
