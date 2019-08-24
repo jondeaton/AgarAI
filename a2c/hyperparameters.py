@@ -31,6 +31,9 @@ class HyperParameters(object):
         self.action_shape = None
         self.batch_size = None
 
+        self.agents_per_env = None
+        self.episode_length = None
+
     def override(self, params):
         """
         Overrides attributes of this object with those of "params".
@@ -92,7 +95,7 @@ class GridEnvHyperparameters(HyperParameters):
         self.entropy_weight = 1e-4
 
         self.action_shape = (16, 2, 2)
-        self.episode_length = 1024
+        self.episode_length = 17
 
         # Agario Game parameters
         self.difficulty = "normal"
@@ -106,7 +109,7 @@ class GridEnvHyperparameters(HyperParameters):
 
         # observation parameters
         self.num_frames = 1
-        self.grid_size = 32
+        self.grid_size = 19
         self.observe_pellets = True
         self.observe_viruses = True
         self.observe_cells   = True
