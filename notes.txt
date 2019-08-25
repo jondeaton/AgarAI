@@ -1,0 +1,26 @@
+From https://stats.stackexchange.com/questions/146424/sample-from-a-von-mises-distribution-by-transforming-a-rv
+
+Simulation for the von Mises distribution is generally done via some 
+form of rejection sampling. There is no method available to transform 
+a random variate from a different distribution to a von Mises random 
+variate in the way you describe. A natural way would have been some 
+form of inversion sampling, but the CDF of the von Mises distribution 
+is not analytic, so this may not be possible.
+
+Two distributions similar to von Mises that may be of interest to you 
+are the Wrapped Normal and Wrapped Cauchy distribution. For the Wrapped
+Normal, we can simply take 
+
+        𝑋 ∼ 𝑁 (𝜇,𝜎²)
+
+then Θ = 𝑋 [mod 2𝜋] to have 𝜃 ∼ 𝑊 𝑁 (𝜇,𝜌), where 𝜌 = exp(−𝜎²/2).
+For the Wrapped Cauchy with parameters 𝜇 and 𝜌, get a random variate 𝑢 
+from Uniform(0,2𝜋), then
+
+        𝑉 = 𝑐𝑜𝑠(𝑢)
+        𝑐 = 2𝜌 / (1 + 𝜌²)
+        𝜃 = acos((𝑉 + 𝑐)/ (1 + 𝑐𝑉)) + 𝜇  [mod 2𝜋].
+
+Then 𝜃 ∼ 𝑊 𝐶 (𝜇,𝜌). This procedure is due to Fisher (1995).
+
+
