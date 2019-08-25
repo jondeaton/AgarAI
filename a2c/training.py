@@ -63,15 +63,17 @@ class Trainer:
                                                               histogram_freq=1)
 
     def _critic_loss(self, returns, value):
+        returns = tf.reshape(returns, [-1])
+        value = tf.reshape(value, [-1])
         return kls.mean_squared_error(returns, value)
 
     def _actor_loss(self, acts_and_advs, logits):
         actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
         actions = tf.cast(tf.squeeze(actions), tf.int32)
 
-        advantages = tf.reshape(advantages, [-1])
-        actions = tf.reshape(actions, [-1])
-        logits = tf.reshape(logits, [-1])
+        # advantages = tf.reshape(advantages, [-1])
+        # actions = tf.reshape(actions, [-1])
+        # logits = tf.reshape(logits, (None, 64))
 
         weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
         policy_loss = weighted_sparse_ce(actions, logits, sample_weight=advantages)
@@ -157,8 +159,7 @@ class Trainer:
         act_adv_batch = np.stack([act_batch, adv_batch], axis=-1)
 
         inputs = (obs_batch, mask)
-        self.model.fit(obs_batch, [act_adv_batch, ret_batch],
-                       batch_size=self.hyperams.batch_size)
+        self.model.train_on_batch(obs_batch, [act_adv_batch, ret_batch])
 
     def _rollout(self, episode, episode_length) -> Rollout:
         # performs a rollout and trains the model on it
@@ -167,14 +168,12 @@ class Trainer:
         observations = self.env.reset()
 
         dones = [False] * self.hyperams.agents_per_env
-
         hc = self.model.cell.get_initial_state(batch_size=self.hyperams.agents_per_env,
                                                dtype=tf.float32)
 
         for t in tqdm(range(episode_length), desc=f"Episode {episode}"):
             if not all(dones):
                 obs_in = tf.convert_to_tensor(observations)
-
                 actions_t, values_t, hc = self.model.cell.action_value(obs_in, hc)
 
                 # convert Tensors to list of action-indices and values
@@ -203,6 +202,7 @@ class Trainer:
         return returns_batch
 
     def test(self):
+        return  # yikes
         logger.info(f"Testing performance...")
         o = self.test_env.reset()
         rewards = list()

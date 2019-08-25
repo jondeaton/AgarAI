@@ -89,7 +89,7 @@ class ActorCritic(tf.keras.Model):
     def __init__(self, action_shape, Encoder):
         super(ActorCritic, self).__init__()
         self.cell = ActorCriticCell(action_shape, Encoder)
-        self.rnn = tf.keras.layers.RNN(self.cell)
+        self.rnn = tf.keras.layers.RNN(self.cell, return_sequences=True)
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
         return self.rnn(inputs, mask=mask, training=training, initial_state=initial_state)

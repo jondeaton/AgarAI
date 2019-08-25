@@ -10,9 +10,18 @@ to start tensorboard during training
       
       
 # todo
+- calibrate the actions so that they are well distributed targets
+- add a single no-move target location
 
-- make sure that action/target mapping is well distributed
-- Report information from the environment about what's happening (to tensorboard)
-- Report estimated Q values to tensorboard
+
+# project list
+
+- LSTM policy
+  - add masking
+  - ConvLSTM
+  - seperate out actions and advantages tensor
+- Generalized Advantage Estimation
+- Proximal Policy Optimization
+- Population-based optimization
 
 
