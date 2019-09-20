@@ -1,7 +1,7 @@
 """
 File: train
 Date: 2019-07-25 
-Author: Jon Deaton (jdeaton@stanford.edu)
+Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
 import os, sys
@@ -9,8 +9,7 @@ import argparse, logging
 import gym, gym_agario
 import numpy as np
 
-import a2c
-from a2c.hyperparameters import *
+from a2c.training import Trainer
 
 logger = logging.getLogger("root")
 logger.propagate = False
@@ -79,13 +78,17 @@ def agario_to_action(index, action_shape):
     y = np.sin(theta) * mag
     return np.array([x, y]), act
 
+
 def main():
     args = parse_args()
+    setup_logger(args, logger)
 
     if args.env == "CartPole-v1":
+        from a2c.hyperparameters import CartPoleHyperparameters
         hyperams = CartPoleHyperparameters()
         to_action = lambda index: index
     elif args.env == "agario-grid-v0":
+        from a2c.hyperparameters import GridEnvHyperparameters
         hyperams = GridEnvHyperparameters()
         to_action = lambda i: agario_to_action(i, hyperams.action_shape)
     else:
@@ -111,7 +114,7 @@ def main():
 
     get_env = lambda: make_environment(args.env, hyperams)
 
-    trainer = a2c.Trainer(get_env, hyperams, to_action,
+    trainer = Trainer(get_env, hyperams, to_action,
                           test_env=make_test_env(args.env, hyperams),
                           training_dir=training_dir)
     trainer.train()
@@ -162,10 +165,13 @@ def parse_args():
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                                default="DEBUG", help="Logging level")
     args = parser.parse_args()
+    return args
 
-    # Setup the logger
 
-    # Logging level configuration
+def setup_logger(args, logger):
+    """ configures the global logger """
+    if not hasattr(args, "log_level"):
+        raise ValueError(f"parsed argumens expected")
     log_level = getattr(logging, args.log_level.upper())
     log_formatter = logging.Formatter('[%(asctime)s][%(levelname)s][%(funcName)s] - %(message)s')
 
@@ -175,9 +181,6 @@ def parse_args():
     logger.addHandler(console_handler)
 
     logger.setLevel(log_level)
-
-    return args
-
 
 if __name__ == "__main__":
     main()

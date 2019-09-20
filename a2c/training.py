@@ -9,29 +9,79 @@ Inspired by:
     
 """
 
-from a2c.Model import ActorCriticCell, ActorCritic
 from a2c.hyperparameters import HyperParameters
-from a2c.Coordinator import Coordinator
-from utils import *
-
+from a2c.rollout import Rollout
+from a2c.coordinator import Coordinator
+from a2c.eager_models import ActorCritic
 import logging
 from datetime import datetime, timedelta
 from tqdm import tqdm
-
 import numpy as np
-
 import tensorflow as tf
 import tensorflow.keras.losses as kls
 import tensorflow.keras.optimizers as ko
+from typing import List
 
 logger = logging.getLogger("root")
 logger.propagate = False
 
+
+def make_returns(rewards: np.ndarray, gamma: float) -> np.ndarray:
+    """ Calculates the discounted future returns for a single rollout
+    :param rewards: numpy array containing rewards
+    :param gamma: discount factor 0 < gamma < 1
+    :return: numpy array containing discounted future returns
+    """
+    returns = np.zeros_like(rewards)
+    returns[-1] = rewards[-1]
+
+    for i in reversed(range(len(rewards) - 1)):
+        returns[i] = rewards[i] + gamma * returns[i + 1]
+
+    return returns
+
+
+def make_returns_batch(reward_batch: List[np.ndarray], gamma: float) -> List[np.ndarray]:
+    """ Calculates discounted episodes returns
+    :param reward_batch: list of numpy arrays. Each numpy array is
+    the episode rewards for a single episode in the batch
+    :param gamma: discount factor 0 < gamma < 1
+    :return: list of numpy arrays representing the returns
+    """
+    return [make_returns(rewards, gamma) for rewards in reward_batch]
+
+
+def critic_loss(returns, value):
+    """ Critic loss defined as MSE for value estimation
+    :param returns: tensor of discounted returns
+    :param value: model-estimated future returns
+    :return: tensor equal to MSE of
+    """
+    returns = tf.reshape(returns, [-1])
+    value = tf.reshape(value, [-1])
+    return kls.mean_squared_error(returns, value)
+
+
+def actor_loss(acts_and_advs, logits):
+    """ Standard advantage Policy gradient loss for Actor
+    :param acts_and_advs:
+    :param logits:
+    :return:
+    """
+    actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
+    actions = tf.cast(tf.squeeze(actions), tf.int32)
+
+    weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
+    policy_loss = weighted_sparse_ce(actions, logits, sample_weight=advantages)
+
+    # entropy loss may be calculated via CE over itself
+    entropy_loss = kls.categorical_crossentropy(logits, logits, from_logits=True)
+    return policy_loss - 1e-4 * entropy_loss
+
+
 class Trainer:
 
-    def __init__(self, get_env, hyperams: HyperParameters, to_action,
-                 test_env=None,
-                 training_dir=None):
+    def __init__(self, get_env, hyperams: HyperParameters, to_action, test_env=None, training_dir=None):
         self.get_env = get_env
         self.hyperams = hyperams
         self.to_action = to_action
@@ -47,7 +97,7 @@ class Trainer:
         # make the model
         self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
         self.model.compile(optimizer=ko.Adam(lr=hyperams.learning_rate, clipnorm=1),
-                           loss=[self._actor_loss, self._critic_loss])
+                           loss=[actor_loss, critic_loss])
 
         self.time_steps = 0
         self.episodes = 0
@@ -61,55 +111,6 @@ class Trainer:
             self.summary_writer = tf.summary.create_file_writer(training_dir)
             self.tensorboard = tf.keras.callbacks.TensorBoard(log_dir=training_dir,
                                                               histogram_freq=1)
-
-    def _critic_loss(self, returns, value):
-        returns = tf.reshape(returns, [-1])
-        value = tf.reshape(value, [-1])
-        return kls.mean_squared_error(returns, value)
-
-    def _actor_loss(self, acts_and_advs, logits):
-        actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
-        actions = tf.cast(tf.squeeze(actions), tf.int32)
-
-        # advantages = tf.reshape(advantages, [-1])
-        # actions = tf.reshape(actions, [-1])
-        # logits = tf.reshape(logits, (None, 64))
-
-        weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
-        policy_loss = weighted_sparse_ce(actions, logits, sample_weight=advantages)
-
-        # entropy loss can be calculated via CE over itself
-        entropy_loss = kls.categorical_crossentropy(logits, logits, from_logits=True)
-        return policy_loss - self.hyperams.entropy_weight * entropy_loss
-
-    class Rollout:
-        def __init__(self):
-            self.observations = list()
-            self.actions = list()
-            self.rewards = list()
-            self.values = list()
-            self.dones = list()
-
-        def record(self, observations, actions, rewards, values, dones):
-            self.observations.append(observations)
-            self.actions.append(actions)
-            self.rewards.append(rewards)
-            self.values.append(values)
-            self.dones.append(dones)
-
-        def to_batch(self):
-            obs_batch = self.transpose_batch(self.observations)
-            action_batch = self.transpose_batch(self.actions)
-            reward_batch = self.transpose_batch(self.rewards)
-            value_batch = self.transpose_batch(self.values)
-            dones = self.transpose_batch(self.dones)
-            return obs_batch, action_batch, reward_batch, value_batch, dones
-
-        @staticmethod
-        def transpose_batch(collection):
-            transposed = zip(*collection)
-            to_arr = lambda rollout: np.array(list(none_filter(rollout)))
-            return list(map(to_arr, transposed))
 
     def train(self, num_episodes=None):
         # with Coordinator(self.get_env, self.num_envs) as self.envs:
@@ -135,7 +136,7 @@ class Trainer:
         Gs = np.array([rs.sum() for rs in rewards])  # episode returns
         print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
 
-        returns = self.make_returns(rewards, self.hyperams.gamma)
+        returns = make_returns_batch(rewards, self.hyperams.gamma)
 
         # flatten list of lists into single batch for training
         # obs_batch = np.concatenate(observations)
@@ -158,12 +159,13 @@ class Trainer:
 
         act_adv_batch = np.stack([act_batch, adv_batch], axis=-1)
 
-        inputs = (obs_batch, mask)
-        self.model.train_on_batch(obs_batch, [act_adv_batch, ret_batch])
+        self.model.fit(obs_batch, [act_adv_batch, ret_batch],
+                       epochs=1,
+                       batch_size=self.hyperams.batch_size)
 
     def _rollout(self, episode, episode_length) -> Rollout:
-        # performs a rollout and trains the model on it
-        rollout = Trainer.Rollout()
+        # performs a rollout and then trains the model on it
+        rollout = Rollout()
 
         observations = self.env.reset()
 
@@ -174,7 +176,7 @@ class Trainer:
         for t in tqdm(range(episode_length), desc=f"Episode {episode}"):
             if not all(dones):
                 obs_in = tf.convert_to_tensor(observations)
-                actions_t, values_t, hc = self.model.cell.action_value(obs_in, hc)
+                actions_t, values_t, hc_ = self.model.cell.action_value(obs_in, hc)
 
                 # convert Tensors to list of action-indices and values
                 actions = actions_t.numpy()
@@ -188,24 +190,10 @@ class Trainer:
 
         return rollout
 
-    @staticmethod
-    def make_returns(reward_batch, gamma):
-        returns_batch = list()
-
-        for reward_rollout in reward_batch:
-            return_rollout = np.zeros_like(reward_rollout)
-            return_rollout[-1] = reward_rollout[-1]
-            for i in reversed(range(len(reward_rollout) - 1)):
-                return_rollout[i] = reward_rollout[i] + gamma * return_rollout[i + 1]
-            returns_batch.append(return_rollout)
-
-        return returns_batch
-
     def test(self):
-        return  # yikes
         logger.info(f"Testing performance...")
         o = self.test_env.reset()
-        rewards = list()
+        rewards = []
         done = False
         lstm_state = np.zeros(32)
         for t in tqdm(range(self.hyperams.episode_length)):

@@ -1,16 +1,14 @@
 """
 File: hyperparameters
 Date: 2019-07-25 
-Author: Jon Deaton (jdeaton@stanford.edu)
+Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
 import json
-import math
-
-from a2c.Model import CNNEncoder, DenseEncoder
+from a2c.eager_models import CNNEncoder, DenseEncoder
 
 
-class HyperParameters(object):
+class HyperParameters:
     """ Simple class for storing model hyper-parameters """
 
     def __init__(self):
@@ -88,11 +86,11 @@ class GridEnvHyperparameters(HyperParameters):
         self.learning_rate = 0.0001
         self.num_episodes = 128
         self.gamma = 0.95
-        self.batch_size = 256
+        self.batch_size = 4
 
         self.num_envs = 4
 
-        self.entropy_weight = 1e-4
+        # self.entropy_weight = 1e-4
 
         self.action_shape = (7, 1, 1)
         self.episode_length = 1024

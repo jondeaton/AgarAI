@@ -4,10 +4,9 @@ Date: 2019-07-28
 Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
+import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
-
-import numpy as np
 
 DROPOUT_PROB = 0.057
 

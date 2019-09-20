@@ -17,7 +17,7 @@ to start tensorboard during training
 # project list
 
 - LSTM policy
-  - add masking
+  - add masking of done or not
   - ConvLSTM
   - seperate out actions and advantages tensor
 - Generalized Advantage Estimation

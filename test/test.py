@@ -1,28 +1,17 @@
 """
 File: test
 Date: 5/7/19 
-Author: Jon Deaton (jdeaton@stanford.edu)
+Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
-import gym
-import gym_agario
-from features.extractors import FeatureExtractor
+import gym, gym_agario
+import unittest
 
-def main():
+class AgarAITest:
 
-    env = gym.make("agario-full-v0")
+    def test_null(self):
+        pass
 
-    env.reset()
-    extractor = FeatureExtractor()
-
-    for _ in range(100):
-
-        action = (0, 0, 0)
-        state, reward, done, info = env.step(action)
-
-        features = extractor(state)
-
-        if done: break
 
 if __name__ == "__main__":
-    main()
+    unittest.main()

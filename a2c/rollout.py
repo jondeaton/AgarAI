@@ -1,0 +1,47 @@
+"""
+File: rollout
+Date: 9/18/19 
+Author: Jon Deaton (jonpauldeaton@gmail.com)
+"""
+
+import numpy as np
+from utils import none_filter
+from typing import List
+
+
+def transpose_batch(collection: List[np.ndarray]) -> List[np.ndarray]:
+    """ performs a transpose of a batch of rollouts
+    :param collection: List[np.ndarray]
+    :return: List[np.ndarray]
+    """
+    transposed = zip(*collection)
+    return [np.array(list(none_filter(rollout))) for rollout in transposed]
+
+
+class Rollout:
+    """ This class represents a batch of "roll-outs". Each roll-out is
+    a complete history of an agent's interactions with it's environment.
+    """
+    def __init__(self):
+        self.observations = []
+        self.actions = []
+        self.rewards = []
+        self.values = []
+        self.dones = []
+
+    def record(self, observations, actions, rewards, values, dones):
+        """ records a single step forwards for each agent in in the batch
+        """
+        self.observations.append(observations)
+        self.actions.append(actions)
+        self.rewards.append(rewards)
+        self.values.append(values)
+        self.dones.append(dones)
+
+    def to_batch(self):
+        obs_batch    = transpose_batch(self.observations)
+        action_batch = transpose_batch(self.actions)
+        reward_batch = transpose_batch(self.rewards)
+        value_batch  = transpose_batch(self.values)
+        dones        = transpose_batch(self.dones)
+        return obs_batch, action_batch, reward_batch, value_batch, dones

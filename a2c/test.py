@@ -4,21 +4,14 @@ Date: 2019-07-28
 Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
+import gym, gym_agario
+import unittest
 
-def test(model, env, render=True):
-    obs, done, ep_reward = env.reset(), False, 0
-    while not done:
-        action, _ = model.action_value(obs[None, :])
-        obs, reward, done, _ = env.step(action)
-        ep_reward += reward
-        if render:
-            env.render()
-    return ep_reward
+class A2CTest:
 
-
-def main():
-    pass
+    def test_null(self):
+        pass
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()
