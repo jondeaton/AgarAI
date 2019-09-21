@@ -4,12 +4,13 @@ Date: 2019-07-28
 Author: Jon Deaton (jdeaton@stanford.edu)
 """
 
-import gym, gym_agario
+import numpy as np
 import unittest
 
-class A2CTest:
 
-    def test_null(self):
+class TrainingTest:
+
+    def test_a2c(self):
         pass
 
 

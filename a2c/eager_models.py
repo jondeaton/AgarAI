@@ -69,9 +69,9 @@ class ActorCriticCell(tf.keras.layers.Layer):
         x = self.dropout(self.dense(x), training=training)
         x, hc_ = self.lstm(x, hc, training=training)
 
-        action_param = self.action_layer(x)
-        values = self.value_layer(x)
-        return (action_param, values), hc_
+        action_logits = self.action_layer(x)
+        values_pred = self.value_layer(x)
+        return (action_logits, values_pred), hc_
 
     def action_value(self, observation, hc):
         (logits, value), next_hc = self.call(observation, hc, training=False)
@@ -85,6 +85,7 @@ class ActorCriticCell(tf.keras.layers.Layer):
 
 
 class ActorCritic(tf.keras.Model):
+
     def __init__(self, action_shape, Encoder):
         super(ActorCritic, self).__init__()
         self.cell = ActorCriticCell(action_shape, Encoder)

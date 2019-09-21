@@ -13,14 +13,17 @@ from a2c.hyperparameters import HyperParameters
 from a2c.rollout import Rollout
 from a2c.coordinator import Coordinator
 from a2c.eager_models import ActorCritic
+
 import logging
 from datetime import datetime, timedelta
 from tqdm import tqdm
+from typing import List
+
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.losses as kls
 import tensorflow.keras.optimizers as ko
-from typing import List
+
 
 logger = logging.getLogger("root")
 logger.propagate = False
@@ -33,10 +36,10 @@ def make_returns(rewards: np.ndarray, gamma: float) -> np.ndarray:
     :return: numpy array containing discounted future returns
     """
     returns = np.zeros_like(rewards)
-    returns[-1] = rewards[-1]
 
-    for i in reversed(range(len(rewards) - 1)):
-        returns[i] = rewards[i] + gamma * returns[i + 1]
+    ret = 0.0
+    for i in reversed(range(len(rewards))):
+        returns[i] = ret = rewards[i] + gamma * ret
 
     return returns
 
@@ -51,32 +54,42 @@ def make_returns_batch(reward_batch: List[np.ndarray], gamma: float) -> List[np.
     return [make_returns(rewards, gamma) for rewards in reward_batch]
 
 
-def critic_loss(returns, value):
+def critic_loss(values_pred, returns):
     """ Critic loss defined as MSE for value estimation
     :param returns: tensor of discounted returns
     :param value: model-estimated future returns
     :return: tensor equal to MSE of
     """
     returns = tf.reshape(returns, [-1])
-    value = tf.reshape(value, [-1])
-    return kls.mean_squared_error(returns, value)
+    values_pred = tf.reshape(values_pred, [-1])
+    return kls.mean_squared_error(returns, values_pred)
 
 
-def actor_loss(acts_and_advs, logits):
-    """ Standard advantage Policy gradient loss for Actor
-    :param acts_and_advs:
-    :param logits:
-    :return:
-    """
-    actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
+def actor_loss(actions, advantages, action_logits):
+    """ Standard advantage Policy gradient loss for Actor """
+
+    # actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
     actions = tf.cast(tf.squeeze(actions), tf.int32)
 
     weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
-    policy_loss = weighted_sparse_ce(actions, logits, sample_weight=advantages)
+    policy_loss = weighted_sparse_ce(actions, action_logits, sample_weight=advantages)
 
     # entropy loss may be calculated via CE over itself
-    entropy_loss = kls.categorical_crossentropy(logits, logits, from_logits=True)
-    return policy_loss - 1e-4 * entropy_loss
+    entropy_loss = kls.categorical_crossentropy(action_logits, action_logits, from_logits=True)
+    return tf.reduce_mean(policy_loss - 1e-4 * entropy_loss)
+
+
+def a2c_loss(model, observations, mask, actions, advantages, returns):
+    """ computes the A2C loss and gradients of the given model w.r.t. that loss """
+    with tf.GradientTape() as tape:
+        action_logits, values_pred = model(observations, mask=mask, training=True)
+
+        actor_loss_value = actor_loss(actions, advantages, action_logits)
+        critic_loss_value = critic_loss(values_pred, returns)
+
+        loss_value = [actor_loss_value, critic_loss_value]
+
+    return loss_value, tape.gradient(loss_value, model.trainable_variables)
 
 
 class Trainer:
@@ -94,10 +107,10 @@ class Trainer:
 
         self.set_seed(hyperams.seed)
 
-        # make the model
+        # build the actor-critic network
         self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
-        self.model.compile(optimizer=ko.Adam(lr=hyperams.learning_rate, clipnorm=1),
-                           loss=[actor_loss, critic_loss])
+
+        self.optimizer = ko.Adam(lr=hyperams.learning_rate, clipnorm=1.0)
 
         self.time_steps = 0
         self.episodes = 0
@@ -138,30 +151,20 @@ class Trainer:
 
         returns = make_returns_batch(rewards, self.hyperams.gamma)
 
-        # flatten list of lists into single batch for training
-        # obs_batch = np.concatenate(observations)
-        # act_batch = np.concatenate(actions)
-        # ret_batch = np.concatenate(returns)
-        # val_batch = np.concatenate(values)
-        # mask = np.logical_not(np.concatenate(dones))
-
-        # adv_batch = ret_batch - np.squeeze(val_batch)
-        # act_adv_batch = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
-        # self.model.fit(obs_batch, [act_adv_batch, ret_batch],
-        #                batch_size=self.hyperams.batch_size)
-
         obs_batch = np.array(observations)
         act_batch = np.array(actions)
         ret_batch = np.array(returns)
         val_batch = np.array(values)
         adv_batch = ret_batch - val_batch
-        mask = np.logical_not(np.array(dones))
+        mask = tf.convert_to_tensor(np.logical_not(np.array(dones)), dtype=tf.bool)
 
-        act_adv_batch = np.stack([act_batch, adv_batch], axis=-1)
+        loss_vars = obs_batch, mask, act_batch, adv_batch, ret_batch
+        (a_loss_val, c_loss_val), grads = a2c_loss(self.model, *loss_vars)
+        logger.info(f"Actor loss: {a_loss_val:.3f}, Critic loss: {c_loss_val:.3f}")
 
-        self.model.fit(obs_batch, [act_adv_batch, ret_batch],
-                       epochs=1,
-                       batch_size=self.hyperams.batch_size)
+        logger.info(f"Applying gradients...")
+        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+
 
     def _rollout(self, episode, episode_length) -> Rollout:
         # performs a rollout and then trains the model on it
@@ -191,6 +194,7 @@ class Trainer:
         return rollout
 
     def test(self):
+        return
         logger.info(f"Testing performance...")
         o = self.test_env.reset()
         rewards = []
