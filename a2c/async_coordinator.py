@@ -24,7 +24,7 @@ def get_rollout(env: RemoteEnvironment, episode_length, initialize, get_actions,
 
     for t in range(episode_length):
         if dones is None or not all(dones):
-            actions, values = get_actions(observations, carry)
+            actions, values, carry = get_actions(observations, carry)
 
             act_in = list(map(to_action, actions))
             next_obs, rewards, dones, _ = env.step(act_in)

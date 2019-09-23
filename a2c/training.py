@@ -147,13 +147,13 @@ class Trainer:
         def get_actions(observations, carry):
             obs_in = tf.convert_to_tensor(observations)
             with lock:
-                actions_t, values_t, hc_ = self.model.cell.action_value(obs_in, carry)
+                actions_t, values_t, carry = self.model.cell.action_value(obs_in, carry)
 
             # convert Tensors to list of action-indices and values
             actions = actions_t.numpy()
             values = list(values_t.numpy())
 
-            return actions, values
+            return actions, values, carry
 
         def initialize():
             with lock:
@@ -203,7 +203,7 @@ class Trainer:
         for t in tqdm(range(episode_length), desc=f"Episode {episode}"):
             if not all(dones):
                 obs_in = tf.convert_to_tensor(observations)
-                actions_t, values_t, hc_ = self.model.cell.action_value(obs_in, hc)
+                actions_t, values_t, hc = self.model.cell.action_value(obs_in, hc)
 
                 # convert Tensors to list of action-indices and values
                 actions = actions_t.numpy()
