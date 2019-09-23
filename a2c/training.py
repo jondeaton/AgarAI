@@ -12,6 +12,7 @@ Inspired by:
 from a2c.hyperparameters import HyperParameters
 from a2c.rollout import Rollout
 from a2c.coordinator import Coordinator
+from a2c.async_coordinator import AsyncCoordinator
 from a2c.eager_models import ActorCritic
 
 import logging
@@ -132,22 +133,46 @@ class Trainer:
 
         num_episodes = num_episodes or self.hyperams.num_episodes
         for ep in range(num_episodes):
-            self.rollout_train(ep)
+            rollout = self._rollout(ep, self.hyperams.episode_length)
+            self.update_with_rollout(rollout)
 
             if ep and ep % 10 == 0:
                 self.test()
 
-    def rollout_train(self, episode: int):
-        """ performs a single rollout of an episode followed
-        by training self.model using the data from that rollout
-        :param episode: the episode number
-        :return: None
-        """
-        rollout = self._rollout(episode, self.hyperams.episode_length)
-        observations, actions, rewards, values, dones = rollout.to_batch()
+    def train_async(self):
 
-        Gs = np.array([rs.sum() for rs in rewards])  # episode returns
-        print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
+        import threading
+        lock = threading.Lock()
+
+        def get_actions(observations, carry):
+            obs_in = tf.convert_to_tensor(observations)
+            with lock:
+                actions_t, values_t, hc_ = self.model.cell.action_value(obs_in, carry)
+
+            # convert Tensors to list of action-indices and values
+            actions = actions_t.numpy()
+            values = list(values_t.numpy())
+
+            return actions, values
+
+        def initialize():
+            with lock:
+                return self.model.cell.get_initial_state(batch_size=self.hyperams.agents_per_env,
+                                                   dtype=tf.float32)
+
+        coordinator = AsyncCoordinator(self.hyperams.num_envs, self.get_env,
+                                       self.hyperams.episode_length,
+                                       initialize, get_actions, self.to_action)
+
+        with coordinator:
+            for ep in range(self.hyperams.num_episodes):
+                rollout = coordinator.await_rollout()
+                self._log_rollout(rollout, ep)
+                self.update_with_rollout(rollout)
+
+    def update_with_rollout(self, rollout):
+        """ updates the network using a rollout """
+        observations, actions, rewards, values, dones = rollout.as_batch()
 
         returns = make_returns_batch(rewards, self.hyperams.gamma)
 
@@ -164,7 +189,6 @@ class Trainer:
 
         logger.info(f"Applying gradients...")
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
-
 
     def _rollout(self, episode, episode_length) -> Rollout:
         # performs a rollout and then trains the model on it
@@ -192,6 +216,12 @@ class Trainer:
                 observations = next_obs
 
         return rollout
+
+    def _log_rollout(self, rollout, episode):
+        """ logs the performance of the rollout """
+        _, _, rewards, _, _ = rollout.as_batch()
+        Gs = np.array([rs.sum() for rs in rewards])  # episode returns
+        print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
 
     def test(self):
         return

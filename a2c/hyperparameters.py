@@ -92,8 +92,8 @@ class GridEnvHyperparameters(HyperParameters):
 
         # self.entropy_weight = 1e-4
 
-        self.action_shape = (7, 1, 1)
-        self.episode_length = 1024
+        self.action_shape = (8, 1, 1)
+        self.episode_length = 512
 
         # Agario Game parameters
         self.difficulty = "normal"

@@ -28,6 +28,7 @@ class Rollout:
         self.rewards = []
         self.values = []
         self.dones = []
+        self._batch = None
 
     def record(self, observations, actions, rewards, values, dones):
         """ records a single step forwards for each agent in in the batch
@@ -38,10 +39,19 @@ class Rollout:
         self.values.append(values)
         self.dones.append(dones)
 
-    def to_batch(self):
+    def as_batch(self):
+        if self._batch is not None:
+            return self._batch
+        self._batch = self._to_batch()
+        return self.as_batch()
+
+    def _to_batch(self):
         obs_batch    = transpose_batch(self.observations)
         action_batch = transpose_batch(self.actions)
         reward_batch = transpose_batch(self.rewards)
         value_batch  = transpose_batch(self.values)
         dones        = transpose_batch(self.dones)
+
+
+
         return obs_batch, action_batch, reward_batch, value_batch, dones

@@ -117,7 +117,9 @@ def main():
     trainer = Trainer(get_env, hyperams, to_action,
                           test_env=make_test_env(args.env, hyperams),
                           training_dir=training_dir)
-    trainer.train()
+    # trainer.train()
+
+    trainer.train_async()
 
     logger.debug("Exiting.")
 
