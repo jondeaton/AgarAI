@@ -8,7 +8,17 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
 
-DROPOUT_PROB = 0.057
+DROPOUT_PROB = 0.057  # yeah super janky
+
+
+def get_encoder_type(encoder_name):
+    """ gets the class of the encoer of the given name """
+    if encoder_name == 'Dense':
+        return DenseEncoder
+    elif encoder_name == 'CNN':
+        return CNNEncoder
+    else:
+        raise ValueError(encoder_name)
 
 
 class DenseEncoder(tf.keras.Model):
@@ -29,9 +39,9 @@ class DenseEncoder(tf.keras.Model):
 class CNNEncoder(tf.keras.Model):
     def __init__(self):
         super(CNNEncoder, self).__init__()
-        self.conv1 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu)
-        self.conv2 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu)
-        self.conv3 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu)
+        self.conv1 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last')
+        self.conv2 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last')
+        self.conv3 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last')
         self.flatten = kl.Flatten()
         self.dropout = kl.Dropout(DROPOUT_PROB)
 
@@ -43,9 +53,9 @@ class CNNEncoder(tf.keras.Model):
         return self.flatten(x)
 
 
-class ActorCriticCell(tf.keras.layers.Layer):
-    def __init__(self, action_shape, Encoder):
-        super(ActorCriticCell, self).__init__()
+class LSTMConvACCell(tf.keras.layers.Layer):
+    def __init__(self, action_shape, Encoder, **kwargs):
+        super(LSTMConvACCell, self).__init__(**kwargs)
         self.encoder = Encoder()
         self.dense = tf.keras.layers.Dense(128, activation=tf.nn.leaky_relu)
         self.dropout = tf.keras.layers.Dropout(DROPOUT_PROB)
@@ -64,32 +74,44 @@ class ActorCriticCell(tf.keras.layers.Layer):
                                            batch_size=batch_size,
                                            dtype=tf.float32)
 
-    def call(self, inputs, hc, training=None):
+    def call(self, inputs, states, training=None):
         x = self.encoder(inputs, training=training)
         x = self.dropout(self.dense(x), training=training)
-        x, hc_ = self.lstm(x, hc, training=training)
+        x, hc_ = self.lstm(x, states, training=training)
 
         action_logits = self.action_layer(x)
         values_pred = self.value_layer(x)
         return (action_logits, values_pred), hc_
 
-    def action_value(self, observation, hc):
-        (logits, value), next_hc = self.call(observation, hc, training=False)
+    def action_value(self, observation, states):
+        (logits, value), next_hc = self.call(observation, states, training=False)
         action = tf.random.categorical(logits, 1)
         return tf.squeeze(action, axis=-1), tf.squeeze(value, axis=1), next_hc
 
-    def action(self, observation, hc):
-        (logits, _), _ = self.call(observation, hc, training=False)
+    def action(self, observation, states):
+        (logits, _), _ = self.call(observation, states, training=False)
         action = tf.random.categorical(logits, 1)
         return tf.squeeze(action, axis=-1)
 
 
-class ActorCritic(tf.keras.Model):
+
+class LSTMAC(tf.keras.Model):
 
     def __init__(self, action_shape, Encoder):
-        super(ActorCritic, self).__init__()
-        self.cell = ActorCriticCell(action_shape, Encoder)
+        super(LSTMAC, self).__init__()
+        self.cell = LSTMConvACCell(action_shape, Encoder)
         self.rnn = tf.keras.layers.RNN(self.cell, return_sequences=True)
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
         return self.rnn(inputs, mask=mask, training=training, initial_state=initial_state)
+
+
+
+class ConvLSTMAC(tf.keras.Model):
+    def __init__(self, action_shape):
+        super(ConvLSTMAC, self).__init__()
+        self.rnn = kl.ConvLSTM2D(8, (3, 3), 1, "same")
+
+
+
+

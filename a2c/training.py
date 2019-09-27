@@ -11,86 +11,47 @@ Inspired by:
 
 from a2c.hyperparameters import HyperParameters
 from a2c.rollout import Rollout
-from a2c.coordinator import Coordinator
 from a2c.async_coordinator import AsyncCoordinator
-from a2c.eager_models import ActorCritic
+from a2c.eager_models import ConvLSTMAC, LSTMAC, get_encoder_type
+from a2c.losses import *
 
-import logging
-from datetime import datetime, timedelta
+import os
 from tqdm import tqdm
-from typing import List
-
 import numpy as np
 import tensorflow as tf
-import tensorflow.keras.losses as kls
 import tensorflow.keras.optimizers as ko
 
-
+import logging
 logger = logging.getLogger("root")
 logger.propagate = False
 
 
-def make_returns(rewards: np.ndarray, gamma: float) -> np.ndarray:
-    """ Calculates the discounted future returns for a single rollout
-    :param rewards: numpy array containing rewards
-    :param gamma: discount factor 0 < gamma < 1
-    :return: numpy array containing discounted future returns
-    """
-    returns = np.zeros_like(rewards)
+def get_rollout(model, env, agents_per_env, episode_length, to_action) -> Rollout:
+    """ performs a rollout """
+    rollout = Rollout()
 
-    ret = 0.0
-    for i in reversed(range(len(rewards))):
-        returns[i] = ret = rewards[i] + gamma * ret
+    observations = env.reset()
 
-    return returns
+    dones = [False] * agents_per_env
+    hc = model.cell.get_initial_state(batch_size=agents_per_env, dtype=tf.float32)
 
+    for _ in range(episode_length):
 
-def make_returns_batch(reward_batch: List[np.ndarray], gamma: float) -> List[np.ndarray]:
-    """ Calculates discounted episodes returns
-    :param reward_batch: list of numpy arrays. Each numpy array is
-    the episode rewards for a single episode in the batch
-    :param gamma: discount factor 0 < gamma < 1
-    :return: list of numpy arrays representing the returns
-    """
-    return [make_returns(rewards, gamma) for rewards in reward_batch]
+        if not all(dones):
+            obs_in = tf.convert_to_tensor(observations)
+            actions_t, values_t, hc = model.cell.action_value(obs_in, hc)
 
+            # convert Tensors to list of action-indices and values
+            actions = actions_t.numpy()
+            act_in = list(map(to_action, actions))
+            values = list(values_t.numpy())
 
-def critic_loss(values_pred, returns):
-    """ Critic loss defined as MSE for value estimation
-    :param returns: tensor of discounted returns
-    :param value: model-estimated future returns
-    :return: tensor equal to MSE of
-    """
-    returns = tf.reshape(returns, [-1])
-    values_pred = tf.reshape(values_pred, [-1])
-    return kls.mean_squared_error(returns, values_pred)
+            next_obs, rewards, dones, _ = env.step(act_in)
 
+            rollout.record(observations, actions, rewards, values, dones)
+            observations = next_obs
 
-def actor_loss(actions, advantages, action_logits):
-    """ Standard advantage Policy gradient loss for Actor """
-
-    # actions, advantages = tf.split(acts_and_advs, 2, axis=-1)
-    actions = tf.cast(tf.squeeze(actions), tf.int32)
-
-    weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
-    policy_loss = weighted_sparse_ce(actions, action_logits, sample_weight=advantages)
-
-    # entropy loss may be calculated via CE over itself
-    entropy_loss = kls.categorical_crossentropy(action_logits, action_logits, from_logits=True)
-    return tf.reduce_mean(policy_loss - 1e-4 * entropy_loss)
-
-
-def a2c_loss(model, observations, mask, actions, advantages, returns):
-    """ computes the A2C loss and gradients of the given model w.r.t. that loss """
-    with tf.GradientTape() as tape:
-        action_logits, values_pred = model(observations, mask=mask, training=True)
-
-        actor_loss_value = actor_loss(actions, advantages, action_logits)
-        critic_loss_value = critic_loss(values_pred, returns)
-
-        loss_value = [actor_loss_value, critic_loss_value]
-
-    return loss_value, tape.gradient(loss_value, model.trainable_variables)
+    return rollout
 
 
 class Trainer:
@@ -102,24 +63,32 @@ class Trainer:
         self.test_env = test_env
 
         self.num_envs = hyperams.num_envs
-        # self.envs = None
-
-        self.env = get_env()
 
         self.set_seed(hyperams.seed)
 
         # build the actor-critic network
-        self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
+        encoder_type = get_encoder_type(hyperams.encoder_class)
+
+        if hyperams.architecture == 'LSTM':
+                self.model = LSTMAC(hyperams.action_shape, encoder_type)
+        elif hyperams.architecture == 'ConvLSTM':
+            self.model = ConvLSTMAC(hyperams.action_shape)
+        else:
+            raise ValueError(hyperams.architecture)
 
         self.optimizer = ko.Adam(lr=hyperams.learning_rate, clipnorm=1.0)
 
-        self.time_steps = 0
-        self.episodes = 0
-        self.gradient_steps = 0
+        env = get_env()
+        input_shape = (None, ) + env.observation_space.shape
 
-        self.last_save = datetime.now()
-        self.save_freq = timedelta(minutes=5)
+        inputs = tf.keras.Input(input_shape)
+        self.model._set_inputs(inputs)
 
+        # self.model.build((None, ) + input_shape)
+
+        del env
+
+        self.training_dir = training_dir
         self.tensorboard = None
         if training_dir is not None:
             self.summary_writer = tf.summary.create_file_writer(training_dir)
@@ -140,7 +109,37 @@ class Trainer:
                 self.test()
 
     def train_async(self):
+        """ trains a model asynchronously """
 
+        if self.training_dir is None:
+            raise ValueError
+
+        def _get_rolllout(model, env):
+            return get_rollout(model, env, self.hyperams.agents_per_env,
+                         self.hyperams.episode_length, self.to_action)
+
+        model_directory = os.path.join(self.training_dir, "model")
+
+        logger.info("Saving model")
+        self.model.save(model_directory, include_optimizer=False)
+        logger.info("Model saved.")
+
+        coordinator = AsyncCoordinator(self.hyperams.num_envs,
+                                       model_directory,
+                                       self.get_env,
+                                       _get_rolllout)
+
+        with coordinator:
+            for ep in range(self.hyperams.num_episodes):
+                rollout = coordinator.await_rollout()
+                self._log_rollout(rollout, ep)
+                self.update_with_rollout(rollout)
+                self.model.save(model_directory)
+
+    def train_async_shared(self):
+        """ trains asynchronously with a single shared model
+        """
+        from a2c.shared_async_coordinator import AsyncCoordinatorShared
         import threading
         lock = threading.Lock()
 
@@ -160,7 +159,7 @@ class Trainer:
                 return self.model.cell.get_initial_state(batch_size=self.hyperams.agents_per_env,
                                                    dtype=tf.float32)
 
-        coordinator = AsyncCoordinator(self.hyperams.num_envs, self.get_env,
+        coordinator = AsyncCoordinatorShared(self.hyperams.num_envs, self.get_env,
                                        self.hyperams.episode_length,
                                        initialize, get_actions, self.to_action)
 
@@ -218,7 +217,7 @@ class Trainer:
         return rollout
 
     def _log_rollout(self, rollout, episode):
-        """ logs the performance of the rollout """
+        """ logs the performance of the roll-out """
         _, _, rewards, _, _ = rollout.as_batch()
         Gs = np.array([rs.sum() for rs in rewards])  # episode returns
         print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
@@ -247,6 +246,6 @@ class Trainer:
         print(f"Return: {G:.0f}, max mass: {mass.max():.0f}, avg. mass: {mass.mean():.1f}, efficiency: {efficiency:.1f}")
 
     def set_seed(self, seed):
+        # todo: this isn't everywhere that it needs to be set
         np.random.seed(seed)
         tf.random.set_seed(seed)
-        self.env.seed(seed)

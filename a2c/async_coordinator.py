@@ -4,85 +4,61 @@ Date: 9/21/19
 Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
-import gym
-
-import threading
-from collections import deque
 
 from a2c.rollout import Rollout
-from a2c.remote_environment import worker_task, RemoteCommand, RemoteEnvironment
+from multiprocessing import Process, Queue, Value
 
 
-def get_rollout(env: RemoteEnvironment, episode_length, initialize, get_actions, to_action):
-    rollout = Rollout()
-
-    observations = env.reset()
-
-    dones = None
-
-    carry = initialize()
-
-    for t in range(episode_length):
-        if dones is None or not all(dones):
-            actions, values, carry = get_actions(observations, carry)
-
-            act_in = list(map(to_action, actions))
-            next_obs, rewards, dones, _ = env.step(act_in)
-
-            rollout.record(observations, actions, rewards, values, dones)
-            observations = next_obs
-
-    return rollout
+def find_model_file(model_directory):
+    return None
 
 
-def thread_task(get_env, episode_length, initialize, get_actions, to_action,
-                cv: threading.Condition, queue: deque):
+def worker_task(queue: Queue, get_rollout, get_env, model_directory):
 
-    with RemoteEnvironment(get_env) as env:
+    env = get_env()
 
-        while True:
-            rollout = get_rollout(env, episode_length, initialize, get_actions, to_action)
-            with cv:
-                queue.append(rollout)
-                cv.notify()
+    import tensorflow as tf
+
+    while True:
+        # model_file = find_model_file(model_directory)
+
+        print("loading model....")
+        model = tf.keras.models.load_model(model_directory)
+
+        rollout = get_rollout(model, env)
+
+        queue.put(rollout)
 
 
 class AsyncCoordinator:
-
-    def __init__(self, num_envs, get_env, episode_length, initialize, get_actions, to_action):
-
+    """ asynchronous remote  """
+    def __init__(self, num_envs, model_directory, get_env, get_rollout):
         self.num_envs = num_envs
+        self.model_directory = model_directory
+        self.get_rollout = get_rollout
         self.get_env = get_env
-        self.get_actions = get_actions
 
-        self.cv = threading.Condition()
-        self.rollout_queue = deque()
-
-        self.args = (get_env,
-                     episode_length, initialize, get_actions, to_action,
-                     self.cv, self.rollout_queue)
+        self.queue = None
 
     def __enter__(self):
-        self.start()
+        self.queue = Queue()
+        self.workers = []
+        for w in range(self.num_envs):
 
-    def __exit__(self, exc_type, exc_value, tb):
-        self.close()
+            args = (self.queue, self.get_rollout, self.get_env, self.model_directory)
 
-    def start(self):
-        self.threads = []
-        for _ in range(self.num_envs):
-            thread = threading.Thread(target=thread_task, args=self.args)
-            thread.start()
-            self.threads.append(thread)
+            worker = Process(target=worker_task, args=args)
+            worker.start()
+            self.workers.append(worker)
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self.queue
 
     def await_rollout(self):
-        """ waits until there is a rollout available """
-        with self.cv:
-            while not self.rollout_queue:
-                self.cv.wait()
-            return self.rollout_queue.popleft()
+        if self.queue is None:
+            raise Exception
+        return self.queue.get()
 
-    def close(self):
-        for thread in self.threads:
-            thread.join()
-        self.threads.clear()
+

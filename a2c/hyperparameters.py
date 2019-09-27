@@ -5,7 +5,6 @@ Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
 import json
-from a2c.eager_models import CNNEncoder, DenseEncoder
 
 
 class HyperParameters:
@@ -31,6 +30,7 @@ class HyperParameters:
 
         self.agents_per_env = None
         self.episode_length = None
+        self.num_episodes = 1000
 
     def override(self, params):
         """
@@ -61,27 +61,14 @@ class HyperParameters:
         return hp
 
 
-class CartPoleHyperparameters(HyperParameters):
-    def __init__(self):
-        super(CartPoleHyperparameters, self).__init__()
-
-        self.env_name = "CartPole-v1"
-        self.EncoderClass = DenseEncoder
-
-        self.num_envs = 128
-        self.learning_rate = 0.05
-        self.action_shape = (2, )
-        self.episode_length = 500
-        self.entropy_weight = 1e-4
-
-
 class GridEnvHyperparameters(HyperParameters):
     def __init__(self):
         super(GridEnvHyperparameters, self).__init__()
 
-        self.env_name = "agario-grid-v0"
+        self.env_name = 'agario-grid-v0'
 
-        self.EncoderClass = CNNEncoder
+        self.architecture = 'LSTM'
+        self.encoder_class = 'CNN'
 
         self.learning_rate = 0.0001
         self.num_episodes = 128
@@ -113,3 +100,16 @@ class GridEnvHyperparameters(HyperParameters):
         self.observe_cells   = True
         self.observe_others  = True
 
+
+class CartPoleHyperparameters(HyperParameters):
+    def __init__(self):
+        super(CartPoleHyperparameters, self).__init__()
+
+        self.env_name = "CartPole-v1"
+        self.encoder_class = 'DenseEncoder'
+
+        self.num_envs = 128
+        self.learning_rate = 0.05
+        self.action_shape = (2, )
+        self.episode_length = 500
+        self.entropy_weight = 1e-4

@@ -16,6 +16,7 @@ logger.propagate = False
 
 
 def make_test_env(env_name, hyperams):
+    """ creates an environment for testing """
     return gym.make(env_name, **{
         'num_agents': 1,
         'difficulty': 'normal',
@@ -65,7 +66,7 @@ def make_environment(env_name, hyperams):
 
 
 def agario_to_action(index, action_shape):
-    """ converts a raw action index into an action shape """
+    """ converts a raw action index into an Agario action """
     if index is None:
         return None
     if type(index) is not int:
@@ -114,11 +115,10 @@ def main():
 
     get_env = lambda: make_environment(args.env, hyperams)
 
-    trainer = Trainer(get_env, hyperams, to_action,
-                          test_env=make_test_env(args.env, hyperams),
-                          training_dir=training_dir)
-    # trainer.train()
+    # test_env = make_test_env(args.env, hyperams)
+    test_env = None
 
+    trainer = Trainer(get_env, hyperams, to_action, test_env=test_env, training_dir=training_dir)
     trainer.train_async()
 
     logger.debug("Exiting.")
@@ -183,6 +183,7 @@ def setup_logger(args, logger):
     logger.addHandler(console_handler)
 
     logger.setLevel(log_level)
+
 
 if __name__ == "__main__":
     main()
