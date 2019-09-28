@@ -119,7 +119,8 @@ def main():
     test_env = None
 
     trainer = Trainer(get_env, hyperams, to_action, test_env=test_env, training_dir=training_dir)
-    trainer.train_async()
+
+    trainer.train(asynchronous=hyperams.asynchronous)
 
     logger.debug("Exiting.")
 
@@ -159,6 +160,8 @@ def parse_args():
     # variable name in "Hyperparameters" in order for over-riding to work correctly.
     hyperams_options.add_argument("-episodes", "--episodes", dest="num_episodes", type=int,
                                   help="Number of epochs to train")
+    hyperams_options.add_argument('-async', '--asynchronous', dest='asynchronous',
+                                  action='store_true', help="")
 
     training_options = parser.add_argument_group("Training")
     training_options.add_argument("-gpu", "--gpu", action='store_true', help="Enable GPU")

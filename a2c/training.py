@@ -27,29 +27,29 @@ logger.propagate = False
 
 
 def get_rollout(model, env, agents_per_env, episode_length, to_action) -> Rollout:
-    """ performs a rollout """
+    """ performs a roll-out """
     rollout = Rollout()
 
     observations = env.reset()
 
     dones = [False] * agents_per_env
-    hc = model.cell.get_initial_state(batch_size=agents_per_env, dtype=tf.float32)
 
+    model.reset_states()
     for _ in range(episode_length):
+        if all(dones): break
 
-        if not all(dones):
-            obs_in = tf.convert_to_tensor(observations)
-            actions_t, values_t, hc = model.cell.action_value(obs_in, hc)
+        obs_tensor = tf.expand_dims(tf.convert_to_tensor(observations), axis=1)
+        action_logits, est_values = model(obs_tensor)
 
-            # convert Tensors to list of action-indices and values
-            actions = actions_t.numpy()
-            act_in = list(map(to_action, actions))
-            values = list(values_t.numpy())
+        # sample the action
+        actions = tf.squeeze(tf.random.categorical(tf.squeeze(action_logits, axis=1), 1), axis=-1).numpy()
+        values = list(tf.squeeze(est_values, axis=[1, 2]).numpy())
 
-            next_obs, rewards, dones, _ = env.step(act_in)
+        next_obs, rewards, next_dones, _ = env.step(list(map(to_action, actions)))
 
-            rollout.record(observations, actions, rewards, values, dones)
-            observations = next_obs
+        rollout.record(observations, actions, rewards, values, dones)
+        dones = next_dones
+        observations = next_obs
 
     return rollout
 
@@ -64,7 +64,7 @@ class Trainer:
 
         self.num_envs = hyperams.num_envs
 
-        self.set_seed(hyperams.seed)
+        self._set_seed(hyperams.seed)
 
         # build the actor-critic network
         encoder_type = get_encoder_type(hyperams.encoder_class)
@@ -78,15 +78,15 @@ class Trainer:
 
         self.optimizer = ko.Adam(lr=hyperams.learning_rate, clipnorm=1.0)
 
-        env = get_env()
-        input_shape = (None, ) + env.observation_space.shape
+        # env = get_env()
+        # input_shape = (None, ) + env.observation_space.shape
 
-        inputs = tf.keras.Input(input_shape)
-        self.model._set_inputs(inputs)
+        # inputs = tf.keras.Input(input_shape)
+        # self.model._set_inputs(inputs)
 
         # self.model.build((None, ) + input_shape)
 
-        del env
+        # del env
 
         self.training_dir = training_dir
         self.tensorboard = None
@@ -95,20 +95,26 @@ class Trainer:
             self.tensorboard = tf.keras.callbacks.TensorBoard(log_dir=training_dir,
                                                               histogram_freq=1)
 
-    def train(self, num_episodes=None):
-        # with Coordinator(self.get_env, self.num_envs) as self.envs:
+    def train(self, asynchronous=False):
+        """ trains a model """
+        if asynchronous:
+            self._train_async()
+        else:
+            self._train_sync()
 
-        # self.test()  # begin with benchmark
+    def _train_sync(self):
+        """ trains a model sequentially with a single environment """
+        env = self.get_env()
 
-        num_episodes = num_episodes or self.hyperams.num_episodes
-        for ep in range(num_episodes):
-            rollout = self._rollout(ep, self.hyperams.episode_length)
-            self.update_with_rollout(rollout)
+        for ep in range(self.hyperams.num_episodes):
+            rollout = get_rollout(self.model, env,
+                                  self.hyperams.agents_per_env,
+                                  self.hyperams.episode_length,
+                                  self.to_action)
 
-            if ep and ep % 10 == 0:
-                self.test()
+            self._update_with_rollout(rollout)
 
-    def train_async(self):
+    def _train_async(self):
         """ trains a model asynchronously """
 
         if self.training_dir is None:
@@ -133,11 +139,12 @@ class Trainer:
             for ep in range(self.hyperams.num_episodes):
                 rollout = coordinator.await_rollout()
                 self._log_rollout(rollout, ep)
-                self.update_with_rollout(rollout)
+                self._update_with_rollout(rollout)
                 self.model.save(model_directory)
 
-    def train_async_shared(self):
+    def _train_async_shared(self):
         """ trains asynchronously with a single shared model
+        todo: this is interesting but ultimately garbage... try make better someday?
         """
         from a2c.shared_async_coordinator import AsyncCoordinatorShared
         import threading
@@ -167,10 +174,10 @@ class Trainer:
             for ep in range(self.hyperams.num_episodes):
                 rollout = coordinator.await_rollout()
                 self._log_rollout(rollout, ep)
-                self.update_with_rollout(rollout)
+                self._update_with_rollout(rollout)
 
-    def update_with_rollout(self, rollout):
-        """ updates the network using a rollout """
+    def _update_with_rollout(self, rollout):
+        """ updates the network using a roll-out """
         observations, actions, rewards, values, dones = rollout.as_batch()
 
         returns = make_returns_batch(rewards, self.hyperams.gamma)
@@ -188,33 +195,6 @@ class Trainer:
 
         logger.info(f"Applying gradients...")
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
-
-    def _rollout(self, episode, episode_length) -> Rollout:
-        # performs a rollout and then trains the model on it
-        rollout = Rollout()
-
-        observations = self.env.reset()
-
-        dones = [False] * self.hyperams.agents_per_env
-        hc = self.model.cell.get_initial_state(batch_size=self.hyperams.agents_per_env,
-                                               dtype=tf.float32)
-
-        for t in tqdm(range(episode_length), desc=f"Episode {episode}"):
-            if not all(dones):
-                obs_in = tf.convert_to_tensor(observations)
-                actions_t, values_t, hc = self.model.cell.action_value(obs_in, hc)
-
-                # convert Tensors to list of action-indices and values
-                actions = actions_t.numpy()
-                act_in = list(map(self.to_action, actions))
-                values = list(values_t.numpy())
-
-                next_obs, rewards, dones, _ = self.env.step(act_in)
-
-                rollout.record(observations, actions, rewards, values, dones)
-                observations = next_obs
-
-        return rollout
 
     def _log_rollout(self, rollout, episode):
         """ logs the performance of the roll-out """
@@ -245,7 +225,7 @@ class Trainer:
 
         print(f"Return: {G:.0f}, max mass: {mass.max():.0f}, avg. mass: {mass.mean():.1f}, efficiency: {efficiency:.1f}")
 
-    def set_seed(self, seed):
+    def _set_seed(self, seed):
         # todo: this isn't everywhere that it needs to be set
         np.random.seed(seed)
         tf.random.set_seed(seed)

@@ -83,24 +83,13 @@ class LSTMConvACCell(tf.keras.layers.Layer):
         values_pred = self.value_layer(x)
         return (action_logits, values_pred), hc_
 
-    def action_value(self, observation, states):
-        (logits, value), next_hc = self.call(observation, states, training=False)
-        action = tf.random.categorical(logits, 1)
-        return tf.squeeze(action, axis=-1), tf.squeeze(value, axis=1), next_hc
-
-    def action(self, observation, states):
-        (logits, _), _ = self.call(observation, states, training=False)
-        action = tf.random.categorical(logits, 1)
-        return tf.squeeze(action, axis=-1)
-
-
 
 class LSTMAC(tf.keras.Model):
 
     def __init__(self, action_shape, Encoder):
         super(LSTMAC, self).__init__()
-        self.cell = LSTMConvACCell(action_shape, Encoder)
-        self.rnn = tf.keras.layers.RNN(self.cell, return_sequences=True)
+        cell = LSTMConvACCell(action_shape, Encoder)
+        self.rnn = tf.keras.layers.RNN(cell, return_sequences=True)
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
         return self.rnn(inputs, mask=mask, training=training, initial_state=initial_state)

@@ -70,6 +70,8 @@ class GridEnvHyperparameters(HyperParameters):
         self.architecture = 'LSTM'
         self.encoder_class = 'CNN'
 
+        self.asynchronous = False
+
         self.learning_rate = 0.0001
         self.num_episodes = 128
         self.gamma = 0.95

@@ -9,10 +9,6 @@ from a2c.rollout import Rollout
 from multiprocessing import Process, Queue, Value
 
 
-def find_model_file(model_directory):
-    return None
-
-
 def worker_task(queue: Queue, get_rollout, get_env, model_directory):
 
     env = get_env()
@@ -20,13 +16,10 @@ def worker_task(queue: Queue, get_rollout, get_env, model_directory):
     import tensorflow as tf
 
     while True:
-        # model_file = find_model_file(model_directory)
 
-        print("loading model....")
+        # get the latest model
         model = tf.keras.models.load_model(model_directory)
-
         rollout = get_rollout(model, env)
-
         queue.put(rollout)
 
 
