@@ -10,7 +10,7 @@ from typing import List
 
 
 def transpose_batch(collection: List[np.ndarray]) -> List[np.ndarray]:
-    """ performs a transpose of a batch of rollouts
+    """ performs a transpose of a batch of roll-out
     :param collection: List[np.ndarray]
     :return: List[np.ndarray]
     """
@@ -40,18 +40,17 @@ class Rollout:
         self.dones.append(dones)
 
     def as_batch(self):
+        """ returns the roll-out as a batch of experiences (will cache) """
         if self._batch is not None:
             return self._batch
         self._batch = self._to_batch()
         return self.as_batch()
 
     def _to_batch(self):
+        """ converts the recorded roll-out to a batch of experiences """
         obs_batch    = transpose_batch(self.observations)
         action_batch = transpose_batch(self.actions)
         reward_batch = transpose_batch(self.rewards)
         value_batch  = transpose_batch(self.values)
         dones        = transpose_batch(self.dones)
-
-
-
         return obs_batch, action_batch, reward_batch, value_batch, dones

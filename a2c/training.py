@@ -10,7 +10,7 @@ Inspired by:
 """
 
 from a2c.hyperparameters import HyperParameters
-from a2c.rollout import Rollout
+from a2c.rollout import Rollout, transpose_batch
 from a2c.async_coordinator import AsyncCoordinator
 from a2c.eager_models import ConvLSTMAC, LSTMAC, get_encoder_type
 from a2c.losses import *
@@ -26,16 +26,17 @@ logger = logging.getLogger("root")
 logger.propagate = False
 
 
-def get_rollout(model, env, agents_per_env, episode_length, to_action) -> Rollout:
+def get_rollout(model, env, agents_per_env, episode_length, to_action,
+                record=True, progress_bar=True) -> Rollout:
     """ performs a roll-out """
-    rollout = Rollout()
+    rollout = Rollout() if record else None
 
     observations = env.reset()
-
     dones = [False] * agents_per_env
-
     model.reset_states()
-    for _ in range(episode_length):
+
+    iter = tqdm(range(episode_length)) if progress_bar else range(episode_length)
+    for _ in iter:
         if all(dones): break
 
         obs_tensor = tf.expand_dims(tf.convert_to_tensor(observations), axis=1)
@@ -47,7 +48,8 @@ def get_rollout(model, env, agents_per_env, episode_length, to_action) -> Rollou
 
         next_obs, rewards, next_dones, _ = env.step(list(map(to_action, actions)))
 
-        rollout.record(observations, actions, rewards, values, dones)
+        if record:
+            rollout.record(observations, actions, rewards, values, dones)
         dones = next_dones
         observations = next_obs
 
@@ -78,15 +80,15 @@ class Trainer:
 
         self.optimizer = ko.Adam(lr=hyperams.learning_rate, clipnorm=1.0)
 
-        # env = get_env()
-        # input_shape = (None, ) + env.observation_space.shape
+        env = get_env()
+        input_shape = (None, ) + env.observation_space.shape
 
-        # inputs = tf.keras.Input(input_shape)
-        # self.model._set_inputs(inputs)
+        inputs = tf.keras.Input(input_shape)
+        self.model._set_inputs(inputs)
 
         # self.model.build((None, ) + input_shape)
 
-        # del env
+        del env
 
         self.training_dir = training_dir
         self.tensorboard = None
@@ -105,7 +107,6 @@ class Trainer:
     def _train_sync(self):
         """ trains a model sequentially with a single environment """
         env = self.get_env()
-
         for ep in range(self.hyperams.num_episodes):
             rollout = get_rollout(self.model, env,
                                   self.hyperams.agents_per_env,
@@ -116,7 +117,6 @@ class Trainer:
 
     def _train_async(self):
         """ trains a model asynchronously """
-
         if self.training_dir is None:
             raise ValueError
 
@@ -203,27 +203,20 @@ class Trainer:
         print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
 
     def test(self):
-        return
         logger.info(f"Testing performance...")
-        o = self.test_env.reset()
-        rewards = []
-        done = False
-        lstm_state = np.zeros(32)
-        for t in tqdm(range(self.hyperams.episode_length)):
-            if not done:
-                a, lstm_state = self.model.action(np.expand_dims(o, axis=0), lstm_state)
-                o, r, done, _ = self.test_env.step(self.to_action(a))
-                rewards.append(r)
+        rollout = get_rollout(self.model, self.test_env,
+                              self.hyperams.agents_per_env,
+                              self.hyperams.episode_length,
+                              self.to_action)
 
-        episode_len = len(rewards)
-        rewards = np.array(rewards)
-        G = rewards.sum()
-        mass = rewards.cumsum() + 10
+        for rewards in transpose_batch(rollout.rewards):
+            G = rewards.sum()
+            mass = rewards.cumsum() + 10
 
-        pellet_density = self.hyperams.num_pellets / pow(self.hyperams.arena_size, 2)
-        efficiency = G / (episode_len * pellet_density)
+            pellet_density = self.hyperams.num_pellets / pow(self.hyperams.arena_size, 2)
+            efficiency = G / (self.hyperams.episode_length * pellet_density)
 
-        print(f"Return: {G:.0f}, max mass: {mass.max():.0f}, avg. mass: {mass.mean():.1f}, efficiency: {efficiency:.1f}")
+            print(f"Return:\t{G:.0f}, max mass:\t{mass.max():.0f}, avg. mass:\t{mass.mean():.1f}, efficiency:\t{efficiency:.1f}")
 
     def _set_seed(self, seed):
         # todo: this isn't everywhere that it needs to be set

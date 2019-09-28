@@ -18,7 +18,7 @@ logger.propagate = False
 def make_test_env(env_name, hyperams):
     """ creates an environment for testing """
     return gym.make(env_name, **{
-        'num_agents': 1,
+        'num_agents': 8,
         'difficulty': 'normal',
         'ticks_per_step': hyperams.ticks_per_step,
         'arena_size': 500,
@@ -115,8 +115,7 @@ def main():
 
     get_env = lambda: make_environment(args.env, hyperams)
 
-    # test_env = make_test_env(args.env, hyperams)
-    test_env = None
+    test_env = make_test_env(args.env, hyperams)
 
     trainer = Trainer(get_env, hyperams, to_action, test_env=test_env, training_dir=training_dir)
 

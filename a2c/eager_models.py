@@ -54,16 +54,12 @@ class CNNEncoder(tf.keras.Model):
 
 
 class LSTMConvACCell(tf.keras.layers.Layer):
-    def __init__(self, action_shape, Encoder, **kwargs):
+    def __init__(self, Encoder, **kwargs):
         super(LSTMConvACCell, self).__init__(**kwargs)
         self.encoder = Encoder()
         self.dense = tf.keras.layers.Dense(128, activation=tf.nn.leaky_relu)
         self.dropout = tf.keras.layers.Dropout(DROPOUT_PROB)
-
         self.lstm = tf.keras.layers.LSTMCell(17)
-
-        self.value_layer = kl.Dense(1, activation=None, name="value")
-        self.action_layer = kl.Dense(np.prod(action_shape), activation=None, name="action")
 
     @property
     def state_size(self):
@@ -77,30 +73,34 @@ class LSTMConvACCell(tf.keras.layers.Layer):
     def call(self, inputs, states, training=None):
         x = self.encoder(inputs, training=training)
         x = self.dropout(self.dense(x), training=training)
-        x, hc_ = self.lstm(x, states, training=training)
-
-        action_logits = self.action_layer(x)
-        values_pred = self.value_layer(x)
-        return (action_logits, values_pred), hc_
+        return self.lstm(x, states, training=training)
 
 
 class LSTMAC(tf.keras.Model):
 
-    def __init__(self, action_shape, Encoder):
+    def __init__(self, action_shape, Encoder, return_sequences=True):
         super(LSTMAC, self).__init__()
-        cell = LSTMConvACCell(action_shape, Encoder)
-        self.rnn = tf.keras.layers.RNN(cell, return_sequences=True)
+        cell = LSTMConvACCell(Encoder)
+        self.rnn = tf.keras.layers.RNN(cell, return_sequences=return_sequences)
+
+        self.value_layer = kl.Dense(1, activation=None, name="value")
+        self.action_layer = kl.Dense(np.prod(action_shape), activation=None, name="action")
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
-        return self.rnn(inputs, mask=mask, training=training, initial_state=initial_state)
-
+        x = self.rnn(inputs, mask=mask, training=training, initial_state=initial_state)
+        return self.action_layer(x), self.value_layer(x)
 
 
 class ConvLSTMAC(tf.keras.Model):
+
     def __init__(self, action_shape):
         super(ConvLSTMAC, self).__init__()
         self.rnn = kl.ConvLSTM2D(8, (3, 3), 1, "same")
+        self.flatten = kl.Flatten()
+        self.value_layer = kl.Dense(1, activation=None, name="value")
+        self.action_layer = kl.Dense(np.prod(action_shape), activation=None, name="action")
 
-
-
-
+    def call(self, input, mask=None, training=None, initial_state=None):
+        x = self.rnn(input, mask=mask, training=training, initial_state=initial_state)
+        x = self.flatten(x)
+        return self.action_layer(x), self.value_layer(x)
