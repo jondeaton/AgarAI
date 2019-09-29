@@ -117,6 +117,7 @@ class Trainer:
         self.num_envs = hyperams.num_envs
         self.training_dir = training_dir
 
+
     def train(self, asynchronous=False):
         """ trains a model """
         if asynchronous:
@@ -150,6 +151,8 @@ class Trainer:
         with coordinator:
             import tensorflow as tf
 
+            summary_writer = tf.summary.create_file_writer(self.training_dir)
+
             input_shape = (None,) + self.get_env().observation_space.shape
             model = make_model(input_shape,
                                self.hyperams.architecture,
@@ -164,11 +167,11 @@ class Trainer:
 
             coordinator.start()  # start the worker processes
 
-            for ep in range(self.hyperams.num_episodes):
+            for episode in range(self.hyperams.num_episodes):
                 rollout_batch = coordinator.pop()
 
-                self._log_rollout(rollout_batch, ep)
-                self._update_with_rollout(model, rollout_batch)
+                losses = self._update_with_rollout(model, rollout_batch)
+                self._log_rollout(summary_writer, episode, rollout_batch, losses)
 
                 model.save_weights(model_directory)
 
@@ -228,9 +231,11 @@ class Trainer:
 
         self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-    def _log_rollout(self, rollout_batch, episode):
+        return a_loss_val, c_loss_val
+
+    def _log_rollout(self, episode, summary_writer, rollout_batch, losses):
         """ logs the performance of the roll-out """
-        episode_length = len(rollout_batch[0])
+        episode_length = len(rollout_batch[2][0])
         logger.info(f"Episode {episode}, length: {episode_length}")
 
         returns = []
@@ -239,11 +244,11 @@ class Trainer:
         efficiencies = []
 
         for rewards in rollout_batch[2]:
-            G = rewards.sum()
-            mass = rewards.cumsum() + 10
+            episode_return = rewards.sum()
+            mass = 10 + rewards.cumsum()
             eff = get_efficiency(rewards, episode_length, self.hyperams)
 
-            returns.append(G)
+            returns.append(episode_return)
             max_masses.append(mass.max())
             average_masses.append(mass.mean())
             efficiencies.append(eff)
@@ -251,7 +256,13 @@ class Trainer:
         print(f"Average Ep Return:\t{np.mean(returns):.2f}")
         print(f"Average Max mass:\t{np.mean(max_masses):.2f}")
         print(f"Average Avg mass:\t{np.mean(average_masses):.2f}")
-        print(f"Average effiency:\t{np.mean(efficiencies):.2f}")
+        print(f"Average efficiency:\t{np.mean(efficiencies):.2f}")
+
+        import tensorflow as tf
+        with summary_writer.as_default():
+            tf.summary.scalar('Average efficiency', np.mean(efficiencies), step=episode)
+            tf.summary.scalar('Actor loss', losses[0], step=episode)
+            tf.summary.scalar('Critic loss', losses[1], step=episode)
 
     def test(self, model, episode_length=None):
         return
@@ -265,7 +276,12 @@ class Trainer:
 
 
 def get_efficiency(rewards, episode_length, hyperams):
-    """ calculates the agario efficiency, which is a made up quantity """
+    """ calculates the "agario mass efficiency", which is a quantity that i invented lol
+    It is supposed to capture the rate at which mass was accumulated relative to
+    the density of pellets in the arena. In this way, performance can be
+    compared across episodes of different lengths, arenas of different sizes
+    and with different numbers of pellets.
+    """
     G = rewards.sum()
     pellet_density = hyperams.num_pellets / pow(hyperams.arena_size, 2)
     efficiency = G / (episode_length * pellet_density)

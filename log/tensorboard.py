@@ -7,19 +7,8 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 import tensorflow as tf
 
 class Tensorboard:
-    _instance = None
-    @staticmethod
-    def getInstance(logdir=None):
-        if Tensorboard._instance is None:
-            return Tensorboard(logdir)
-        return Tensorboard._instance
 
     def __init__(self, logdir):
-        if Tensorboard._instance is not None:
-            raise Exception("use Tensorboard.getInstance() to get the tensorboard logger")
-        else:
-            Tensorboard._instance = self
-
         if logdir is not None:
             self.set_directory(logdir)
 

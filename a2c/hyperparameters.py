@@ -73,7 +73,7 @@ class GridEnvHyperparameters(HyperParameters):
         self.asynchronous = False
 
         self.learning_rate = 0.0001
-        self.num_episodes = 128
+        self.num_episodes = 4096
         self.gamma = 0.95
         self.batch_size = 4
 
