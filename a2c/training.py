@@ -67,8 +67,9 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
                               hyperams.agents_per_env,
                               hyperams.episode_length,
                               to_action,
-                              progress_bar=False)
-        queue.put(rollout)
+                              progress_bar=True)
+        queue.put(rollout.as_batch())
+        del rollout # saves alot of memory
 
 
 def get_rollout(model, env, agents_per_env, episode_length, to_action,
@@ -162,9 +163,9 @@ class Trainer:
             coordinator.start()  # start the worker processes
 
             for ep in range(self.hyperams.num_episodes):
-                rollout = coordinator.pop()
-                self._log_rollout(rollout, ep, self.hyperams.episode_length)
-                self._update_with_rollout(model, rollout)
+                rollout_batch = coordinator.pop()
+                #self._log_rollout(rollout_batcht, ep, self.hyperams.episode_length)
+                self._update_with_rollout(model, rollout_batch)
                 model.save_weights(model_directory)
 
     def _train_async_shared(self):
@@ -201,12 +202,12 @@ class Trainer:
         #         self._log_rollout(rollout, ep)
         #         self._update_with_rollout(rollout)
 
-    def _update_with_rollout(self, model, rollout):
+    def _update_with_rollout(self, model, rollout_batch):
         """ updates the network using a roll-out """
         import tensorflow as tf
         from a2c.losses import a2c_loss, make_returns_batch
 
-        observations, actions, rewards, values, dones = rollout.as_batch()
+        observations, actions, rewards, values, dones = rollout_batch
 
         returns = make_returns_batch(rewards, self.hyperams.gamma)
 
