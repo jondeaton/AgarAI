@@ -63,14 +63,11 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
 
     while True:
         model.load_weights(model_directory)
-
-        print(f"Worker {wid} starting episode...")
         rollout = get_rollout(model, env,
                               hyperams.agents_per_env,
                               hyperams.episode_length,
                               to_action,
                               progress_bar=False)
-        print(f"Worker {wid} episode finished")
         queue.put(rollout)
 
 
@@ -224,7 +221,6 @@ class Trainer:
         (a_loss_val, c_loss_val), grads = a2c_loss(model, *loss_vars)
         logger.info(f"Actor loss: {a_loss_val:.3f}, Critic loss: {c_loss_val:.3f}")
 
-        logger.info(f"Applying gradients...")
         self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
     def _log_rollout(self, rollout, episode, episode_length):
@@ -246,10 +242,10 @@ class Trainer:
             average_masses.append(mass.mean())
             efficiencies.append(eff)
 
-        print(f"Average Return:\t{np.mean(returns):.0f}")
-        print(f"Average Max mass:\t{np.mean(max_masses):.0f}")
-        print(f"Average mass:\t{np.mean(average_masses):.0f}")
-        print(f"Average efficiency:\t{np.mean(efficiencies):.0f}")
+        print(f"Average Ep Return:\t{np.mean(returns):.2f}")
+        print(f"Average Max mass:\t{np.mean(max_masses):.2f}")
+        print(f"Average Avg mass:\t{np.mean(average_masses):.2f}")
+        print(f"Average effiency:\t{np.mean(efficiencies):.2f}")
 
     def test(self, model, episode_length=None):
         return
