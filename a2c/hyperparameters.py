@@ -77,7 +77,7 @@ class GridEnvHyperparameters(HyperParameters):
         self.gamma = 0.95
         self.batch_size = 4
 
-        self.num_envs = 4
+        self.num_envs = 6
 
         # self.entropy_weight = 1e-4
 

@@ -16,6 +16,7 @@ from a2c.async_coordinator import AsyncCoordinator
 import os
 from tqdm import tqdm
 import numpy as np
+import random
 import logging
 logger = logging.getLogger("root")
 logger.propagate = False
@@ -48,7 +49,7 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
         master process. """
     print(f"Worker {wid} started")
 
-    import os
+    # workers can't use GPU because TensorFlow...
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
     env = get_env()
@@ -63,9 +64,12 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
 
     while True:
         model.load_weights(model_directory)
+
+        episode_length = random.randint(32, hyperams.episode_length)
+
         rollout = get_rollout(model, env,
                               hyperams.agents_per_env,
-                              hyperams.episode_length,
+                              episode_length,
                               to_action,
                               progress_bar=True)
         queue.put(rollout.as_batch(cache=False))
@@ -163,7 +167,7 @@ class Trainer:
             for ep in range(self.hyperams.num_episodes):
                 rollout_batch = coordinator.pop()
 
-                self._log_rollout(rollout_batch, ep, self.hyperams.episode_length)
+                self._log_rollout(rollout_batch, ep)
                 self._update_with_rollout(model, rollout_batch)
 
                 model.save_weights(model_directory)
@@ -224,9 +228,10 @@ class Trainer:
 
         self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-    def _log_rollout(self, rollout_batch, episode, episode_length):
+    def _log_rollout(self, rollout_batch, episode):
         """ logs the performance of the roll-out """
-        logger.info(f"Episode {episode}")
+        episode_length = len(rollout_batch[0])
+        logger.info(f"Episode {episode}, length: {episode_length}")
 
         returns = []
         max_masses = []
