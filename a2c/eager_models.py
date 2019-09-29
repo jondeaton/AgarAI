@@ -21,10 +21,10 @@ def get_encoder_type(encoder_name):
         raise ValueError(encoder_name)
 
 
-class DenseEncoder(tf.keras.Model):
-    def __init__(self):
+class DenseEncoder(tf.keras.layers.Layer):
+    def __init__(self, input_shape=None):
         super(DenseEncoder, self).__init__()
-        self.dense1 = tf.keras.layers.Dense(16, activation=tf.nn.relu)
+        self.dense1 = tf.keras.layers.Dense(16, activation=tf.nn.relu, input_shape=input_shape)
         self.dense2 = tf.keras.layers.Dense(16, activation=tf.nn.relu)
         self.dense3 = tf.keras.layers.Dense(16, activation=tf.nn.relu)
         self.dropout = tf.keras.layers.Dropout(DROPOUT_PROB)
@@ -36,14 +36,20 @@ class DenseEncoder(tf.keras.Model):
         return x
 
 
-class CNNEncoder(tf.keras.Model):
-    def __init__(self):
+class CNNEncoder(tf.keras.layers.Layer):
+    def __init__(self, input_shape=None):
         super(CNNEncoder, self).__init__()
-        self.conv1 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last')
+        self.conv1 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last', input_shape=input_shape)
         self.conv2 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last')
         self.conv3 = kl.Conv2D(8, 3, 1, activation=tf.nn.leaky_relu, data_format='channels_last')
         self.flatten = kl.Flatten()
         self.dropout = kl.Dropout(DROPOUT_PROB)
+
+    def compute_output_shape(self, input_shape):
+        shape = self.conv1.compute_output_shape(input_shape)
+        shape = self.conv2.compute_output_shape(shape)
+        shape = self.conv3.compute_output_shape(shape)
+        return self.flatten.compute_output_shape(shape)
 
     def call(self, inputs, training=None):
         x = tf.dtypes.cast(inputs, tf.float32)
@@ -53,41 +59,22 @@ class CNNEncoder(tf.keras.Model):
         return self.flatten(x)
 
 
-class LSTMConvACCell(tf.keras.layers.Layer):
-    def __init__(self, Encoder, **kwargs):
-        super(LSTMConvACCell, self).__init__(**kwargs)
-        self.encoder = Encoder()
-        self.dense = tf.keras.layers.Dense(128, activation=tf.nn.leaky_relu)
-        self.dropout = tf.keras.layers.Dropout(DROPOUT_PROB)
-        self.lstm = tf.keras.layers.LSTMCell(17)
-
-    @property
-    def state_size(self):
-        return self.lstm.state_size
-
-    def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
-        return self.lstm.get_initial_state(inputs=inputs,
-                                           batch_size=batch_size,
-                                           dtype=tf.float32)
-
-    def call(self, inputs, states, training=None):
-        x = self.encoder(inputs, training=training)
-        x = self.dropout(self.dense(x), training=training)
-        return self.lstm(x, states, training=training)
-
-
 class LSTMAC(tf.keras.Model):
 
-    def __init__(self, action_shape, Encoder, return_sequences=True):
+    def __init__(self, input_shape, action_shape, Encoder, return_sequences=True):
         super(LSTMAC, self).__init__()
-        cell = LSTMConvACCell(Encoder)
-        self.rnn = tf.keras.layers.RNN(cell, return_sequences=return_sequences)
+        self.encoder = tf.keras.layers.TimeDistributed(Encoder(input_shape=input_shape))
+        self.dense = tf.keras.layers.Dense(128, activation=tf.nn.leaky_relu)
+        self.dropout = tf.keras.layers.Dropout(DROPOUT_PROB)
+        self.lstm = tf.keras.layers.LSTM(64, return_sequences=return_sequences)
 
         self.value_layer = kl.Dense(1, activation=None, name="value")
         self.action_layer = kl.Dense(np.prod(action_shape), activation=None, name="action")
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
-        x = self.rnn(inputs, mask=mask, training=training, initial_state=initial_state)
+        x = self.encoder(inputs, training=training)
+        x = self.dropout(self.dense(x), training=training)
+        x = self.lstm(x, mask=mask, training=training, initial_state=initial_state)
         return self.action_layer(x), self.value_layer(x)
 
 

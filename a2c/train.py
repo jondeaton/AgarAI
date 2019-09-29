@@ -3,7 +3,6 @@ File: train
 Date: 2019-07-25 
 Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
-
 import os, sys
 import argparse, logging
 import gym, gym_agario

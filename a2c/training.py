@@ -33,13 +33,18 @@ def get_rollout(model, env, agents_per_env, episode_length, to_action,
 
     observations = env.reset()
     dones = [False] * agents_per_env
+
+    print("resetting states...")
     model.reset_states()
 
     iter = tqdm(range(episode_length)) if progress_bar else range(episode_length)
     for _ in iter:
         if all(dones): break
 
+        print("converting observations to tensor...")
         obs_tensor = tf.expand_dims(tf.convert_to_tensor(observations), axis=1)
+
+        print("getting actions...")
         action_logits, est_values = model(obs_tensor)
 
         # sample the action
@@ -56,6 +61,23 @@ def get_rollout(model, env, agents_per_env, episode_length, to_action,
     return rollout
 
 
+def make_model(input_shape, architecture, encoder_class, action_shape):
+    """ build the actor-critic network """
+    Encoder = get_encoder_type(encoder_class)
+
+    if architecture == 'LSTM':
+        model = LSTMAC(input_shape, action_shape, Encoder)
+
+    elif architecture == 'ConvLSTM':
+        model = ConvLSTMAC(action_shape)
+
+    else:
+        raise ValueError(architecture)
+
+    return model
+
+
+
 class Trainer:
 
     def __init__(self, get_env, hyperams: HyperParameters, to_action, test_env=None, training_dir=None):
@@ -68,27 +90,13 @@ class Trainer:
 
         self._set_seed(hyperams.seed)
 
-        # build the actor-critic network
-        encoder_type = get_encoder_type(hyperams.encoder_class)
-
-        if hyperams.architecture == 'LSTM':
-                self.model = LSTMAC(hyperams.action_shape, encoder_type)
-        elif hyperams.architecture == 'ConvLSTM':
-            self.model = ConvLSTMAC(hyperams.action_shape)
-        else:
-            raise ValueError(hyperams.architecture)
+        self.input_shape = (None,) + self.get_env().observation_space.shape
+        self.model = make_model(self.input_shape,
+                                self.hyperams.architecture,
+                                self.hyperams.encoder_class,
+                                self.hyperams.action_shape)
 
         self.optimizer = ko.Adam(lr=hyperams.learning_rate, clipnorm=1.0)
-
-        env = get_env()
-        input_shape = (None, ) + env.observation_space.shape
-
-        inputs = tf.keras.Input(input_shape)
-        self.model._set_inputs(inputs)
-
-        # self.model.build((None, ) + input_shape)
-
-        del env
 
         self.training_dir = training_dir
         self.tensorboard = None
@@ -108,11 +116,12 @@ class Trainer:
         """ trains a model sequentially with a single environment """
         env = self.get_env()
         for ep in range(self.hyperams.num_episodes):
+            episode_length = min(10 + ep, self.hyperams.episode_length)
             rollout = get_rollout(self.model, env,
                                   self.hyperams.agents_per_env,
-                                  self.hyperams.episode_length,
+                                  episode_length,
                                   self.to_action)
-
+            self._log_rollout(rollout, ep, episode_length)
             self._update_with_rollout(rollout)
 
     def _train_async(self):
@@ -121,26 +130,31 @@ class Trainer:
             raise ValueError
 
         def _get_rolllout(model, env):
+            """ closure alias for get_rollout with captured hyperparameters """
             return get_rollout(model, env, self.hyperams.agents_per_env,
                          self.hyperams.episode_length, self.to_action)
 
+        def _make_model():
+            return make_model(self.input_shape,
+                              self.hyperams.architecture,
+                              self.hyperams.encoder_class,
+                              self.hyperams.action_shape)
+
         model_directory = os.path.join(self.training_dir, "model")
 
-        logger.info("Saving model")
-        self.model.save(model_directory, include_optimizer=False)
-        logger.info("Model saved.")
+        logger.info("Saving initial model...")
+        self.model.save_weights(model_directory)
+        logger.info("Initial model saved.")
 
-        coordinator = AsyncCoordinator(self.hyperams.num_envs,
-                                       model_directory,
-                                       self.get_env,
-                                       _get_rolllout)
+        coordinator = AsyncCoordinator(self.hyperams.num_envs, model_directory,
+                                       _make_model, self.get_env, _get_rolllout)
 
         with coordinator:
             for ep in range(self.hyperams.num_episodes):
                 rollout = coordinator.await_rollout()
-                self._log_rollout(rollout, ep)
+                self._log_rollout(rollout, ep, self.hyperams.episode_length)
                 self._update_with_rollout(rollout)
-                self.model.save(model_directory)
+                self.model.save_weights(model_directory)
 
     def _train_async_shared(self):
         """ trains asynchronously with a single shared model
@@ -196,29 +210,34 @@ class Trainer:
         logger.info(f"Applying gradients...")
         self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
 
-    def _log_rollout(self, rollout, episode):
+    def _log_rollout(self, rollout, episode, episode_length):
         """ logs the performance of the roll-out """
-        _, _, rewards, _, _ = rollout.as_batch()
-        Gs = np.array([rs.sum() for rs in rewards])  # episode returns
-        print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
-
-    def test(self):
-        logger.info(f"Testing performance...")
-        rollout = get_rollout(self.model, self.test_env,
-                              self.hyperams.agents_per_env,
-                              self.hyperams.episode_length,
-                              self.to_action)
+        logger.info(f"Episode {episode}")
 
         for rewards in transpose_batch(rollout.rewards):
-            G = rewards.sum()
             mass = rewards.cumsum() + 10
+            eff = get_efficiency(rewards, episode_length, self.hyperams)
+            print(f"Return:\t{G:.0f}, max mass:\t{mass.max():.0f}, avg. mass:\t{mass.mean():.1f}, efficiency:\t{eff:.1f}")
 
-            pellet_density = self.hyperams.num_pellets / pow(self.hyperams.arena_size, 2)
-            efficiency = G / (self.hyperams.episode_length * pellet_density)
 
-            print(f"Return:\t{G:.0f}, max mass:\t{mass.max():.0f}, avg. mass:\t{mass.mean():.1f}, efficiency:\t{efficiency:.1f}")
+    def test(self, episode_length=None):
+        logger.info(f"Testing performance...")
+        episode_length = episode_length or self.hyperams.episode_length
+        rollout = get_rollout(self.model, self.test_env,
+                              self.hyperams.agents_per_env,
+                              episode_length, self.to_action)
+
+        self._log_rollout(rollout, "test", episode_length)
 
     def _set_seed(self, seed):
         # todo: this isn't everywhere that it needs to be set
         np.random.seed(seed)
         tf.random.set_seed(seed)
+
+
+def get_efficiency(rewards, episode_length, hyperams):
+    """ calculates the agario efficiency, which is a made up quantity """
+    G = rewards.sum()
+    pellet_density = hyperams.num_pellets / pow(hyperams.arena_size, 2)
+    efficiency = G / (episode_length * pellet_density)
+    return efficiency
