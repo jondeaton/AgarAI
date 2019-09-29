@@ -18,7 +18,7 @@ class HyperParameters:
         self.EncoderClass = None
         self.action_shape = None
 
-        self.num_envs = 4
+        self.num_envs = 16
 
         # optimizer
         self.learning_rate = None
@@ -82,7 +82,7 @@ class GridEnvHyperparameters(HyperParameters):
         # self.entropy_weight = 1e-4
 
         self.action_shape = (8, 1, 1)
-        self.episode_length = 512
+        self.episode_length = 128
 
         # Agario Game parameters
         self.difficulty = "normal"

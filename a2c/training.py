@@ -47,6 +47,9 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
     """ the task that each worker process performs: gather the complete
          roll-out of an episode using the latest model and send it back to the
          master process. """
+
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"]="-1"
     env = get_env()
 
     input_shape = (None,) + env.observation_space.shape
@@ -121,15 +124,17 @@ class Trainer:
 
     def _train_sync(self):
         """ trains a model sequentially with a single environment """
+        raise NotImplementedError()
         env = self.get_env()
+        model = None # todo
         for ep in range(self.hyperams.num_episodes):
             episode_length = min(10 + ep, self.hyperams.episode_length)
-            rollout = get_rollout(self.model, env,
+            rollout = get_rollout(model, env,
                                   self.hyperams.agents_per_env,
                                   episode_length,
                                   self.to_action)
             self._log_rollout(rollout, ep, episode_length)
-            self._update_with_rollout(rollout)
+            self._update_with_rollout(model, rollout)
 
     def _train_async(self):
         """ trains a model asynchronously """
@@ -160,7 +165,7 @@ class Trainer:
             for ep in range(self.hyperams.num_episodes):
                 rollout = coordinator.pop()
                 self._log_rollout(rollout, ep, self.hyperams.episode_length)
-                self._update_with_rollout(rollout)
+                self._update_with_rollout(model, rollout)
                 model.save_weights(model_directory)
 
     def _train_async_shared(self):
@@ -197,7 +202,7 @@ class Trainer:
         #         self._log_rollout(rollout, ep)
         #         self._update_with_rollout(rollout)
 
-    def _update_with_rollout(self, rollout):
+    def _update_with_rollout(self, model, rollout):
         """ updates the network using a roll-out """
         import tensorflow as tf
         from a2c.losses import a2c_loss, make_returns_batch
@@ -214,11 +219,11 @@ class Trainer:
         mask = tf.convert_to_tensor(np.logical_not(np.array(dones)), dtype=tf.bool)
 
         loss_vars = obs_batch, mask, act_batch, adv_batch, ret_batch
-        (a_loss_val, c_loss_val), grads = a2c_loss(self.model, *loss_vars)
+        (a_loss_val, c_loss_val), grads = a2c_loss(model, *loss_vars)
         logger.info(f"Actor loss: {a_loss_val:.3f}, Critic loss: {c_loss_val:.3f}")
 
         logger.info(f"Applying gradients...")
-        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
 
     def _log_rollout(self, rollout, episode, episode_length):
@@ -232,11 +237,11 @@ class Trainer:
             print(f"Return:\t{G:.0f}, max mass:\t{mass.max():.0f}, avg. mass:\t{mass.mean():.1f}, efficiency:\t{eff:.1f}")
 
 
-    def test(self, episode_length=None):
+    def test(self, model, episode_length=None):
         return
         logger.info(f"Testing performance...")
         episode_length = episode_length or self.hyperams.episode_length
-        rollout = get_rollout(self.model, self.test_env,
+        rollout = get_rollout(model, self.test_env,
                               self.hyperams.agents_per_env,
                               episode_length, self.to_action)
 
