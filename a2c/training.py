@@ -233,7 +233,7 @@ class Trainer:
 
         return a_loss_val, c_loss_val
 
-    def _log_rollout(self, episode, summary_writer, rollout_batch, losses):
+    def _log_rollout(self, summary_writer, episode, rollout_batch, losses):
         """ logs the performance of the roll-out """
         episode_length = len(rollout_batch[2][0])
         logger.info(f"Episode {episode}, length: {episode_length}")
