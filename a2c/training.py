@@ -42,11 +42,11 @@ def make_model(input_shape, architecture, encoder_class, action_shape):
 
 
 def worker_target(wid: int, queue: Queue, sema: Semaphore,
-                  get_env, model_directory, to_action,
-                  hyperams: HyperParameters):
+                  get_env, model_directory, to_action, hyperams: HyperParameters):
     """ the task that each worker process performs: gather the complete
-         roll-out of an episode using the latest model and send it back to the
-         master process. """
+        roll-out of an episode using the latest model and send it back to the
+        master process. """
+    print(f"Worker {wid} started")
 
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
@@ -68,8 +68,8 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
                               hyperams.episode_length,
                               to_action,
                               progress_bar=True)
-        queue.put(rollout.as_batch())
-        del rollout # saves alot of memory
+        queue.put(rollout.as_batch(cache=False))
+        del rollout  # saves some memory
 
 
 def get_rollout(model, env, agents_per_env, episode_length, to_action,
@@ -101,8 +101,6 @@ def get_rollout(model, env, agents_per_env, episode_length, to_action,
         observations = next_obs
 
     return rollout
-
-
 
 
 class Trainer:
@@ -164,8 +162,10 @@ class Trainer:
 
             for ep in range(self.hyperams.num_episodes):
                 rollout_batch = coordinator.pop()
-                #self._log_rollout(rollout_batcht, ep, self.hyperams.episode_length)
+
+                self._log_rollout(rollout_batch, ep, self.hyperams.episode_length)
                 self._update_with_rollout(model, rollout_batch)
+
                 model.save_weights(model_directory)
 
     def _train_async_shared(self):
@@ -224,7 +224,7 @@ class Trainer:
 
         self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-    def _log_rollout(self, rollout, episode, episode_length):
+    def _log_rollout(self, rollout_batch, episode, episode_length):
         """ logs the performance of the roll-out """
         logger.info(f"Episode {episode}")
 
@@ -233,7 +233,7 @@ class Trainer:
         average_masses = []
         efficiencies = []
 
-        for rewards in transpose_batch(rollout.rewards):
+        for rewards in rollout_batch[2]:
             G = rewards.sum()
             mass = rewards.cumsum() + 10
             eff = get_efficiency(rewards, episode_length, self.hyperams)
