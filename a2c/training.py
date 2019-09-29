@@ -49,7 +49,8 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
          master process. """
 
     import os
-    os.environ["CUDA_VISIBLE_DEVICES"]="-1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
     env = get_env()
 
     input_shape = (None,) + env.observation_space.shape
@@ -67,7 +68,8 @@ def worker_target(wid: int, queue: Queue, sema: Semaphore,
         rollout = get_rollout(model, env,
                               hyperams.agents_per_env,
                               hyperams.episode_length,
-                              to_action)
+                              to_action,
+                              progress_bar=False)
         print(f"Worker {wid} episode finished")
         queue.put(rollout)
 
@@ -225,17 +227,29 @@ class Trainer:
         logger.info(f"Applying gradients...")
         self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-
     def _log_rollout(self, rollout, episode, episode_length):
         """ logs the performance of the roll-out """
         logger.info(f"Episode {episode}")
+
+        returns = []
+        max_masses = []
+        average_masses = []
+        efficiencies = []
 
         for rewards in transpose_batch(rollout.rewards):
             G = rewards.sum()
             mass = rewards.cumsum() + 10
             eff = get_efficiency(rewards, episode_length, self.hyperams)
-            print(f"Return:\t{G:.0f}, max mass:\t{mass.max():.0f}, avg. mass:\t{mass.mean():.1f}, efficiency:\t{eff:.1f}")
 
+            returns.append(G)
+            max_masses.append(mass.max())
+            average_masses.append(mass.mean())
+            efficiencies.append(eff)
+
+        print(f"Average Return:\t{np.mean(returns):.0f}")
+        print(f"Average Max mass:\t{np.mean(max_masses):.0f}")
+        print(f"Average mass:\t{np.mean(average_masses):.0f}")
+        print(f"Average efficiency:\t{np.mean(efficiencies):.0f}")
 
     def test(self, model, episode_length=None):
         return

@@ -161,9 +161,6 @@ def parse_args():
     hyperams_options.add_argument('-async', '--asynchronous', dest='asynchronous',
                                   action='store_true', help="")
 
-    training_options = parser.add_argument_group("Training")
-    training_options.add_argument("-gpu", "--gpu", action='store_true', help="Enable GPU")
-
     logging_group = parser.add_argument_group("Logging")
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
                                default="DEBUG", help="Logging level")
