@@ -230,9 +230,14 @@ class Trainer:
 
         loss_vars = get_loss_variables(rollout_batch, self.hyperams.gamma, model.recurrent)
 
-        for loss_vars_batch in batch_loss_variables(loss_vars, self.hyperams.batch_size):
-            losses, grads = a2c_loss(model, self.hyperams.entropy_weight, *loss_vars_batch)
+        if self.hyperams.batch:
+            for loss_vars_batch in batch_loss_variables(loss_vars, self.hyperams.batch_size):
+                losses, grads = a2c_loss(model, self.hyperams.entropy_weight, *loss_vars_batch)
+                self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
+        else:
+            losses, grads = a2c_loss(model, self.hyperams.entropy_weight, *loss_vars)
             self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
+
         return losses
 
     def _log_rollout(self, summary_writer, episode, rollout_batch, losses=None):
