@@ -30,7 +30,9 @@ class HyperParameters:
 
         self.agents_per_env = None
         self.episode_length = None
-        self.num_episodes = 1000
+        self.num_episodes = None
+
+        self.save_frequency = 8
 
     def override(self, params):
         """
@@ -67,7 +69,7 @@ class GridEnvHyperparameters(HyperParameters):
 
         self.env_name = 'agario-grid-v0'
 
-        self.architecture = 'LSTM'
+        self.architecture = 'Basic'
         self.encoder_class = 'CNN'
 
         self.asynchronous = False
@@ -75,11 +77,11 @@ class GridEnvHyperparameters(HyperParameters):
         self.learning_rate = 0.0001
         self.num_episodes = 4096
         self.gamma = 0.95
-        self.batch_size = 4
+        self.batch_size = 16
 
-        self.num_envs = 6
+        self.num_envs = 4
 
-        # self.entropy_weight = 1e-4
+        self.entropy_weight = 1e-4
 
         self.action_shape = (8, 1, 1)
         self.episode_length = 512
