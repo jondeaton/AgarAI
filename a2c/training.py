@@ -9,196 +9,290 @@ Inspired by:
     
 """
 
-from a2c.Model import ActorCritic
 from a2c.hyperparameters import HyperParameters
-from a2c.Coordinator import Coordinator
-from utils import *
+from a2c.rollout import Rollout, transpose_batch
+from a2c.async_coordinator import AsyncCoordinator
 
-import logging
-from datetime import datetime, timedelta
+import os
 from tqdm import tqdm
-
 import numpy as np
-
-import tensorflow as tf
-import tensorflow.keras.losses as kls
-import tensorflow.keras.optimizers as ko
-
+import random
+import logging
 logger = logging.getLogger("root")
 logger.propagate = False
 
+from multiprocessing import Queue, Semaphore
+
+
+def worker_target(wid: int, queue: Queue, sema: Semaphore,
+                  get_env, model_directory, to_action, hyperams: HyperParameters):
+    """ the task that each worker process performs: gather the complete
+        roll-out of an episode using the latest model and send it back to the
+        master process. """
+    print(f"Worker {wid} started")
+
+    env = get_env()
+
+    # workers can't use GPU because TensorFlow...
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+    from a2c.eager_models import make_model
+
+    input_shape = (None,) + env.observation_space.shape
+    model = make_model(hyperams.architecture,
+                       hyperams.encoder_class,
+                       input_shape,
+                       hyperams.action_shape)
+
+    sema.acquire()  # wait for master process to signal
+
+    while True:
+        model.load_weights(model_directory)
+        rollout = get_rollout(model, env,
+                              hyperams.agents_per_env,
+                              hyperams.episode_length,
+                              to_action,
+                              progress_bar=True)
+        queue.put(rollout.as_batch(cache=False))
+        del rollout  # saves some memory
+
+
+def get_rollout(model, env, agents_per_env, episode_length, to_action,
+                record=True, progress_bar=True) -> Rollout:
+    """ performs a roll-out """
+    import tensorflow as tf
+    rollout = Rollout() if record else None
+
+    observations = env.reset()
+    dones = [False] * agents_per_env
+
+    if model.recurrent:
+        model.reset_states()
+
+    iter = tqdm(range(episode_length)) if progress_bar else range(episode_length)
+    for _ in iter:
+        if all(dones): break
+
+        obs_tensor = tf.convert_to_tensor(observations)
+
+        # need to add time time dimension for recurrent models only
+        if model.recurrent:
+                obs_tensor = tf.expand_dims(obs_tensor, axis=1)
+
+        action_logits, est_values = model(obs_tensor)
+
+        # sample the action
+        if model.recurrent:
+            action_logits = tf.squeeze(action_logits, axis=1)
+        actions = tf.squeeze(tf.random.categorical(action_logits, 1), axis=-1).numpy()
+
+        # reshape the critic's value estimations
+        # todo: im only like 90% sure that this is part is corect...
+        squeeze_axes = [1, 2] if model.recurrent else 1
+        values = list(tf.squeeze(est_values, axis=squeeze_axes).numpy())
+
+        next_obs, rewards, next_dones, _ = env.step(list(map(to_action, actions)))
+
+        if record:
+            rollout.record(observations, actions, rewards, values, dones)
+        dones = next_dones
+        observations = next_obs
+
+    return rollout
+
+
 class Trainer:
 
-    def __init__(self, get_env, hyperams: HyperParameters, to_action,
-                 test_env=None,
-                 training_dir=None):
+    def __init__(self, get_env, hyperams: HyperParameters, to_action, test_env=None, training_dir=None):
         self.get_env = get_env
         self.hyperams = hyperams
         self.to_action = to_action
         self.test_env = test_env
-
         self.num_envs = hyperams.num_envs
-        # self.envs = None
+        self.training_dir = training_dir
 
-        self.env = get_env()
+    def train(self, asynchronous=False):
+        """ trains a model """
+        if asynchronous:
+            self._train_async()
+        else:
+            self._train_sync()
 
-        self.set_seed(hyperams.seed)
-        self.model = ActorCritic(hyperams.action_shape, hyperams.EncoderClass)
-        self.model.compile(optimizer=ko.Adam(lr=hyperams.learning_rate, clipnorm=1),
-                           loss=[self._actor_loss, self._critic_loss])
+    def _train_sync(self):
+        """ trains a model sequentially with a single environment """
+        env = self.get_env()
 
-        self.time_steps = 0
-        self.episodes = 0
-        self.gradient_steps = 0
+        import tensorflow as tf
+        from a2c.eager_models import make_model
+        input_shape = (None,) + env.observation_space.shape
+        model = make_model(self.hyperams.architecture,
+                           self.hyperams.encoder_class,
+                           input_shape,
+                           self.hyperams.action_shape)
 
-        self.last_save = datetime.now()
-        self.save_freq = timedelta(minutes=5)
+        self.optimizer = tf.keras.optimizers.Adam(lr=self.hyperams.learning_rate, clipnorm=1.0)
 
-        self.tensorboard = None
-        if training_dir is not None:
-            self.summary_writer = tf.summary.create_file_writer(training_dir)
-            self.tensorboard = tf.keras.callbacks.TensorBoard(log_dir=training_dir,
-                                                              histogram_freq=1)
+        summary_writer = None
+        if self.training_dir is not None:
+            model_directory = os.path.join(self.training_dir, "model")
+            summary_writer = tf.summary.create_file_writer(self.training_dir)
 
-    def _critic_loss(self, returns, value):
-        return kls.mean_squared_error(returns, value)
+        for ep in range(self.hyperams.num_episodes):
+            logger.info(f"Episode {ep}")
+            episode_length = self.hyperams.episode_length
+            rollout = get_rollout(model, env,
+                                  self.hyperams.agents_per_env,
+                                  episode_length,
+                                  self.to_action)
 
-    def _actor_loss(self, acts_and_advs, logits):
-        actions, advantages = tf.split(acts_and_advs, 2, axis=1)
-        actions = tf.cast(actions, tf.int32)
+            losses = self._update_with_rollout(model, rollout.as_batch())
+            self._log_rollout(summary_writer, ep, rollout.as_batch(), losses)
 
-        weighted_sparse_ce = kls.SparseCategoricalCrossentropy(from_logits=True)
-        policy_loss = weighted_sparse_ce(actions, logits, sample_weight=advantages)
+            if self.training_dir is not None and ep % self.hyperams.save_frequency == 0:
+                logger.info("Checkpointing model...")
+                model.save_weights(model_directory)
 
-        # entropy loss can be calculated via CE over itself
-        entropy_loss = kls.categorical_crossentropy(logits, logits, from_logits=True)
-        return policy_loss - self.hyperams.entropy_weight * entropy_loss
+    def _train_async(self):
+        """ trains a model asynchronously """
 
-    class Rollout:
-        def __init__(self):
-            self.observations = list()
-            self.actions = list()
-            self.rewards = list()
-            self.values = list()
+        model_directory = os.path.join(self.training_dir, "model")
 
-        def record(self, observations, actions, rewards, values):
-            self.observations.append(observations)
-            self.actions.append(actions)
-            self.rewards.append(rewards)
-            self.values.append(values)
+        args = self.get_env, model_directory, self.to_action, self.hyperams
+        coordinator = AsyncCoordinator(self.hyperams.num_envs,
+                                       worker_target, args)
 
-        def to_batch(self):
-            obs_batch = self.tranpose_batch(self.observations)
-            action_batch = self.tranpose_batch(self.actions)
-            reward_batch = self.tranpose_batch(self.rewards)
-            value_batch = self.tranpose_batch(self.values)
-            return obs_batch, action_batch, reward_batch, value_batch
+        with coordinator:
+            import tensorflow as tf
+            from a2c.eager_models import make_model
 
-        @staticmethod
-        def tranpose_batch(collection):
-            transposed = zip(*collection)
-            to_arr = lambda rollout: np.array(list(none_filter(rollout)))
-            return list(map(to_arr, transposed))
+            summary_writer = tf.summary.create_file_writer(self.training_dir)
 
-    def train(self, num_episodes=None):
-        # with Coordinator(self.get_env, self.num_envs) as self.envs:
+            input_shape = (None,) + self.get_env().observation_space.shape
+            model = make_model(self.hyperams.architecture,
+                               self.hyperams.encoder_class,
+                               input_shape,
+                               self.hyperams.action_shape)
 
-        self.test()  # begin with benchmark
+            self.optimizer = tf.keras.optimizers.Adam(lr=self.hyperams.learning_rate, clipnorm=1.0)
 
-        num_episodes = num_episodes or self.hyperams.num_episodes
-        for ep in range(num_episodes):
-            self.rollout_train(ep)
+            logger.info("Saving initial model...")
+            model.save_weights(model_directory)
+            logger.info("Initial model saved.")
 
-            if ep and ep % 10 == 0:
-                self.test()
+            coordinator.start()  # start the worker processes
 
-    def rollout_train(self, episode):
-        rollout = self.rollout_(episode, self.hyperams.episode_length)
-        observations, actions, rewards, values = rollout.to_batch()
+            for episode in range(self.hyperams.num_episodes):
+                rollout_batch = coordinator.pop()
 
-        Gs = np.array([rs.sum() for rs in rewards])
-        print(f"Episode {episode} returns: {Gs.min():.0f} min. {Gs.mean():.1f} ± {Gs.std():.0f} avg. {Gs.max():.0f} max.")
+                losses = self._update_with_rollout(model, rollout_batch)
+                self._log_rollout(summary_writer, episode, rollout_batch, losses=losses)
 
-        returns = self.make_returns(rewards, self.hyperams.gamma)
+                model.save_weights(model_directory)
 
-        # flatten list of lists into single batch
-        obs_batch = np.concatenate(observations)
-        act_batch = np.concatenate(actions)
-        ret_batch = np.concatenate(returns)
-        val_batch = np.concatenate(values)
+    def _train_async_shared(self):
+        """ trains asynchronously with a single shared model
+        todo: this is interesting but ultimately garbage... try make better someday?
+        """
+        # from a2c.shared_async_coordinator import AsyncCoordinatorShared
+        # import threading
+        # lock = threading.Lock()
+        #
+        # def get_actions(observations, carry):
+        #     obs_in = tf.convert_to_tensor(observations)
+        #     with lock:
+        #         actions_t, values_t, carry = self.model.cell.action_value(obs_in, carry)
+        #
+        #     # convert Tensors to list of action-indices and values
+        #     actions = actions_t.numpy()
+        #     values = list(values_t.numpy())
+        #
+        #     return actions, values, carry
+        #
+        # def initialize():
+        #     with lock:
+        #         return self.model.cell.get_initial_state(batch_size=self.hyperams.agents_per_env,
+        #                                            dtype=tf.float32)
+        #
+        # coordinator = AsyncCoordinatorShared(self.hyperams.num_envs, self.get_env,
+        #                                self.hyperams.episode_length,
+        #                                initialize, get_actions, self.to_action)
+        #
+        # with coordinator:
+        #     for ep in range(self.hyperams.num_episodes):
+        #         rollout = coordinator.await_rollout()
+        #         self._log_rollout(rollout, ep)
+        #         self._update_with_rollout(rollout)
 
-        adv_batch = ret_batch - np.squeeze(val_batch)
-        act_adv_batch = np.concatenate([act_batch[:, None], adv_batch[:, None]], axis=1)
+    def _update_with_rollout(self, model, rollout_batch):
+        """ updates the network using a roll-out """
 
-        n, *_ = obs_batch.shape
+        from a2c.losses import a2c_loss, get_loss_variables, batch_loss_variables
 
-        self.model.fit(obs_batch, [act_adv_batch, ret_batch],
-                       shuffle=True, batch_size=self.hyperams.batch_size)
+        loss_vars = get_loss_variables(rollout_batch, self.hyperams.gamma, model.recurrent)
 
-    def rollout_(self, episode, episode_length):
-        # performs a rollout and trains the model on it
-        rollout = Trainer.Rollout()
+        if self.hyperams.batch:
+            for loss_vars_batch in batch_loss_variables(loss_vars, self.hyperams.batch_size):
+                losses, grads = a2c_loss(model, self.hyperams.entropy_weight, *loss_vars_batch)
+                self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
+        else:
+            losses, grads = a2c_loss(model, self.hyperams.entropy_weight, *loss_vars)
+            self.optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-        observations = self.env.reset()
+        return losses
 
-        dones = [False] * self.hyperams.agents_per_env
-        for t in tqdm(range(episode_length), desc=f"Episode {episode}"):
-            if not all(dones):
-                obs_in = np.array(list(filter(is_not_None, observations)))
-                actions_t, values_t = self.model.action_value(obs_in)
+    def _log_rollout(self, summary_writer, episode, rollout_batch, losses=None):
+        """ logs the performance of the roll-out """
+        episode_length = len(rollout_batch[2][0])
+        logger.info(f"Episode {episode}, length: {episode_length}")
+        if losses is not None:
+            logger.info(f"Actor loss: {losses[0]:.3f}, Critic loss: {losses[1]:.3f}")
 
-                actions = list()
-                values = list()
-                j = 0
-                for i in range(self.hyperams.agents_per_env):
-                    if not dones[i]:
-                        actions.append(actions_t[j])
-                        values.append(values_t[j])
-                        j += 1
-                    else:
-                        actions.append(None)
-                        values.append(None)
+        returns = []
+        max_masses = []
+        average_masses = []
+        efficiencies = []
 
-                next_observations, rewards, dones, _ = self.env.step(list(map(self.to_action, actions)))
+        for rewards in rollout_batch[2]:
+            episode_return = rewards.sum()
+            mass = 10 + rewards.cumsum()
+            eff = get_efficiency(rewards, episode_length, self.hyperams)
 
-                rollout.record(observations, actions, rewards, values)
-                observations = next_observations
+            returns.append(episode_return)
+            max_masses.append(mass.max())
+            average_masses.append(mass.mean())
+            efficiencies.append(eff)
 
-        return rollout
+        print(f"Average Ep Return:\t{np.mean(returns):.2f}")
+        print(f"Average Max mass:\t{np.mean(max_masses):.2f}")
+        print(f"Average Avg mass:\t{np.mean(average_masses):.2f}")
+        print(f"Average efficiency:\t{np.mean(efficiencies):.2f}")
 
-    @staticmethod
-    def make_returns(reward_batch, gamma):
-        returns_batch = list()
+        if summary_writer is not None:  # in debug mode theres no directory to write to
+            import tensorflow as tf
+            with summary_writer.as_default():
+                tf.summary.scalar('train/efficiency', np.mean(efficiencies), step=episode)
+                if losses is not None:
+                    tf.summary.scalar('loss/actor', losses[0], step=episode)
+                    tf.summary.scalar('loss/critic', losses[1], step=episode)
 
-        for reward_rollout in reward_batch:
-            return_rollout = np.zeros_like(reward_rollout)
-            return_rollout[-1] = reward_rollout[-1]
-            for i in reversed(range(len(reward_rollout) - 1)):
-                return_rollout[i] = reward_rollout[i] + gamma * return_rollout[i + 1]
-            returns_batch.append(return_rollout)
-
-        return returns_batch
-
-    def test(self):
+    def _test(self, model, summary_writer=None, episode_length=None):
         logger.info(f"Testing performance...")
-        o = self.test_env.reset()
-        rewards = list()
-        done = False
-        for t in tqdm(range(self.hyperams.episode_length)):
-            if not done:
-                a = self.model.action(np.expand_dims(o, axis=0))
-                o, r, done, _ = self.test_env.step(self.to_action(a))
-                rewards.append(r)
+        episode_length = episode_length or self.hyperams.episode_length
+        rollout = get_rollout(model, self.test_env, self.hyperams.agents_per_env,
+                              episode_length, self.to_action)
 
-        episode_len = len(rewards)
-        rewards = np.array(rewards)
-        G = rewards.sum()
-        mass = rewards.cumsum() + 10
+        # todo: pass the real summary writer to log results to TensorBoard.
+        self._log_rollout(summary_writer, "test", rollout.as_batch(), episode_length)
 
-        pellet_density = self.hyperams.num_pellets / pow(self.hyperams.arena_size, 2)
-        efficiency = G / (episode_len * pellet_density)
 
-        print(f"Return: {G:.0f}, max mass: {mass.max():.0f}, avg. mass: {mass.mean():.1f}, efficiency: {efficiency:.1f}")
-
-    def set_seed(self, seed):
-        self.env.seed(seed)
+def get_efficiency(rewards, episode_length, hyperams):
+    """ calculates the "agario mass efficiency", which is a quantity that i invented lol
+    It is supposed to capture the rate at which mass was accumulated relative to
+    the density of pellets in the arena. In this way, performance can be
+    compared across episodes of different lengths, arenas of different sizes
+    and with different numbers of pellets.
+    """
+    G = rewards.sum()
+    pellet_density = hyperams.num_pellets / pow(hyperams.arena_size, 2)
+    efficiency = G / (episode_length * pellet_density)
+    return efficiency

@@ -6,56 +6,12 @@ Author: Jon Deaton (jdeaton@stanford.edu)
 Inspired by: https://github.com/MG2033/A2C
 
 """
-import gym
-import numpy as np
-from enum import Enum
+
 import logging
-
-from typing import List
-
-import multiprocessing as mp
 from multiprocessing import Pipe, Process
+from a2c.remote_environment import worker_task, RemoteCommand
 
 logger = logging.getLogger()
-
-
-class RemoteCommand(Enum):
-    step = 1
-    reset = 2
-    close = 3
-    observation_space = 4
-    action_space = 5
-
-
-def worker_task(pipe, get_env):
-    env: gym.Env = get_env()
-
-    while True:
-        try:
-            msg = pipe.recv()
-        except (KeyboardInterrupt, EOFError):
-            return
-
-        if type(msg) is tuple:
-            command, data = msg
-        else:
-            command = msg
-
-        if command == RemoteCommand.step:
-            step_data = env.step(data)
-            pipe.send(step_data)
-        elif command == RemoteCommand.reset:
-            ob = env.reset()
-            pipe.send(ob)
-        elif command == RemoteCommand.close:
-            pipe.close()
-            return
-        elif command == RemoteCommand.observation_space:
-            pipe.send(env.observation_space)
-        elif command == RemoteCommand.action_space:
-            pipe.send(env.action_space)
-        else:
-            raise ValueError(command)
 
 
 class Coordinator:
@@ -91,9 +47,9 @@ class Coordinator:
                 msg = RemoteCommand.step, actions[i]
                 self.pipes[i].send(msg)
 
-        obs = list()
-        rs = list()
-        infos = list()
+        obs = []
+        rs = []
+        infos = []
         for i in range(self.num_workers):
             if not self.dones[i]:
                 o, r, done, info = self.pipes[i].recv()
