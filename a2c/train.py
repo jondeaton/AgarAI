@@ -3,7 +3,6 @@ File: train
 Date: 2019-07-25 
 Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
-
 import os, sys
 import argparse, logging
 import gym, gym_agario
@@ -16,8 +15,9 @@ logger.propagate = False
 
 
 def make_test_env(env_name, hyperams):
+    """ creates an environment for testing """
     return gym.make(env_name, **{
-        'num_agents': 1,
+        'num_agents': 8,
         'difficulty': 'normal',
         'ticks_per_step': hyperams.ticks_per_step,
         'arena_size': 500,
@@ -65,7 +65,7 @@ def make_environment(env_name, hyperams):
 
 
 def agario_to_action(index, action_shape):
-    """ converts a raw action index into an action shape """
+    """ converts a raw action index into an Agario action """
     if index is None:
         return None
     if type(index) is not int:
@@ -114,12 +114,11 @@ def main():
 
     get_env = lambda: make_environment(args.env, hyperams)
 
-    trainer = Trainer(get_env, hyperams, to_action,
-                          test_env=make_test_env(args.env, hyperams),
-                          training_dir=training_dir)
-    # trainer.train()
+    test_env = make_test_env(args.env, hyperams)
 
-    trainer.train_async()
+    trainer = Trainer(get_env, hyperams, to_action, test_env=test_env, training_dir=training_dir)
+
+    trainer.train(asynchronous=hyperams.asynchronous)
 
     logger.debug("Exiting.")
 
@@ -145,8 +144,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="CartPole-v1",
-                             choices=["CartPole-v1", "agario-grid-v0",
+    env_options.add_argument("--env", default="agario-grid-v0",
+                             choices=["agario-grid-v0", "CartPole-v1",
                                       "RoboschoolHalfCheetah-v1"])
 
     output_options = parser.add_argument_group("Output")
@@ -159,9 +158,8 @@ def parse_args():
     # variable name in "Hyperparameters" in order for over-riding to work correctly.
     hyperams_options.add_argument("-episodes", "--episodes", dest="num_episodes", type=int,
                                   help="Number of epochs to train")
-
-    training_options = parser.add_argument_group("Training")
-    training_options.add_argument("-gpu", "--gpu", action='store_true', help="Enable GPU")
+    hyperams_options.add_argument('-async', '--asynchronous', dest='asynchronous',
+                                  action='store_true', help="")
 
     logging_group = parser.add_argument_group("Logging")
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
@@ -183,6 +181,7 @@ def setup_logger(args, logger):
     logger.addHandler(console_handler)
 
     logger.setLevel(log_level)
+
 
 if __name__ == "__main__":
     main()
