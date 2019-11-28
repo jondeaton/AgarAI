@@ -5,7 +5,6 @@ Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
 import json
-from a2c.eager_models import CNNEncoder, DenseEncoder
 
 
 class HyperParameters:
@@ -19,7 +18,7 @@ class HyperParameters:
         self.EncoderClass = None
         self.action_shape = None
 
-        self.num_envs = 4
+        self.num_envs = None
 
         # optimizer
         self.learning_rate = None
@@ -31,6 +30,9 @@ class HyperParameters:
 
         self.agents_per_env = None
         self.episode_length = None
+        self.num_episodes = None
+
+        self.save_frequency = 8
 
     def override(self, params):
         """
@@ -61,39 +63,30 @@ class HyperParameters:
         return hp
 
 
-class CartPoleHyperparameters(HyperParameters):
-    def __init__(self):
-        super(CartPoleHyperparameters, self).__init__()
-
-        self.env_name = "CartPole-v1"
-        self.EncoderClass = DenseEncoder
-
-        self.num_envs = 128
-        self.learning_rate = 0.05
-        self.action_shape = (2, )
-        self.episode_length = 500
-        self.entropy_weight = 1e-4
-
-
 class GridEnvHyperparameters(HyperParameters):
     def __init__(self):
         super(GridEnvHyperparameters, self).__init__()
 
-        self.env_name = "agario-grid-v0"
+        self.env_name = 'agario-grid-v0'
 
-        self.EncoderClass = CNNEncoder
+        self.architecture = 'Basic'
+        self.encoder_class = 'CNN'
 
-        self.learning_rate = 0.0001
-        self.num_episodes = 128
+        self.asynchronous = False
+
+        self.learning_rate = 0.01
+        self.num_episodes = 4096
         self.gamma = 0.95
-        self.batch_size = 4
+
+        self.batch = False
+        self.batch_size = 64
 
         self.num_envs = 4
 
-        # self.entropy_weight = 1e-4
+        self.entropy_weight = 1e-4
 
-        self.action_shape = (7, 1, 1)
-        self.episode_length = 1024
+        self.action_shape = (8, 1, 1)
+        self.episode_length = 512
 
         # Agario Game parameters
         self.difficulty = "normal"
@@ -113,3 +106,16 @@ class GridEnvHyperparameters(HyperParameters):
         self.observe_cells   = True
         self.observe_others  = True
 
+
+class CartPoleHyperparameters(HyperParameters):
+    def __init__(self):
+        super(CartPoleHyperparameters, self).__init__()
+
+        self.env_name = "CartPole-v1"
+        self.encoder_class = 'DenseEncoder'
+
+        self.num_envs = 128
+        self.learning_rate = 0.05
+        self.action_shape = (2, )
+        self.episode_length = 500
+        self.entropy_weight = 1e-4
