@@ -21,6 +21,23 @@ def get_encoder_type(encoder_name):
         raise ValueError(encoder_name)
 
 
+def make_model(architecture, encoder_class, input_shape, action_shape):
+    """ build the actor-critic network """
+    Encoder = get_encoder_type(encoder_class)
+
+    if architecture == 'Basic':
+        return BasicActorCritic(input_shape, action_shape, Encoder)
+
+    elif architecture == 'LSTM':
+        return LSTMActorCritic(input_shape, action_shape, Encoder)
+
+    elif architecture == 'ConvLSTM':
+        return ConvLSTMAC(action_shape)
+
+    else:
+        raise ValueError(f"Unknown architecture: {architecture}")
+
+
 class DenseEncoder(tf.keras.layers.Layer):
     def __init__(self, input_shape=None):
         super(DenseEncoder, self).__init__()
@@ -59,17 +76,45 @@ class CNNEncoder(tf.keras.layers.Layer):
         return self.flatten(x)
 
 
-class LSTMAC(tf.keras.Model):
+class ActorCritic:
 
-    def __init__(self, input_shape, action_shape, Encoder, return_sequences=True):
-        super(LSTMAC, self).__init__()
+    def __init__(self, action_shape):
+        self.value_layer = kl.Dense(1, activation=None, name="value")
+        self.action_layer = kl.Dense(np.prod(action_shape), activation=None, name="action")
+
+    @property
+    def recurrent(self):
+        return False
+
+
+class RecurrentActorCritic(ActorCritic):
+    @property
+    def recurrent(self):
+        return True
+
+
+class BasicActorCritic(tf.keras.Model, ActorCritic):
+
+    def __init__(self, input_shape, action_shape, Encoder):
+        tf.keras.Model.__init__(self)
+        ActorCritic.__init__(self, action_shape)
+        self.encoder = Encoder(input_shape=input_shape)
+
+    def call(self, inputs, mask=None, training=None, initial_state=None):
+        encoding = self.encoder(inputs, training=training)
+        return self.action_layer(encoding), self.value_layer(encoding)
+
+
+class LSTMActorCritic(tf.keras.Model, RecurrentActorCritic):
+
+    def __init__(self, input_shape, action_shape, Encoder):
+        tf.keras.Model.__init__(self)
+        RecurrentActorCritic.__init__(self, action_shape)
+
         self.encoder = tf.keras.layers.TimeDistributed(Encoder(input_shape=input_shape))
         self.dense = tf.keras.layers.Dense(128, activation=tf.nn.leaky_relu)
         self.dropout = tf.keras.layers.Dropout(DROPOUT_PROB)
-        self.lstm = tf.keras.layers.LSTM(64, return_sequences=return_sequences)
-
-        self.value_layer = kl.Dense(1, activation=None, name="value")
-        self.action_layer = kl.Dense(np.prod(action_shape), activation=None, name="action")
+        self.lstm = tf.keras.layers.LSTM(64, return_sequences=True)
 
     def call(self, inputs, mask=None, training=None, initial_state=None):
         x = self.encoder(inputs, training=training)

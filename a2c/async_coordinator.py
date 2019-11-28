@@ -4,62 +4,63 @@ Date: 9/21/19
 Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
-
-
-from a2c.rollout import Rollout
-from multiprocessing import Process, Queue, Value
-
-
-def worker_task(wid, queue: Queue, get_rollout, make_model, get_env, model_directory):
-    """ the task that each worker process performs: gather the complete
-     roll-out of an episode using the latest model and send it back to the
-     master process. """
-    env = get_env()
-    model = make_model()
-
-    while True:
-        model.load_weights(model_directory)
-
-        print(f"Worker {wid} starting episode...")
-        rollout: Rollout = get_rollout(model, env)
-        print(f"Worker {wid} episode finished")
-
-        queue.put(rollout)
+from multiprocessing import Process, Queue, Condition, Semaphore
 
 
 class AsyncCoordinator:
-    """ asynchronous remote  """
-    def __init__(self, num_envs, model_directory, make_model, get_env, get_rollout):
-        self.num_envs = num_envs
-        self.model_directory = model_directory
-        self.get_rollout = get_rollout
-        self.make_model = make_model
-        self.get_env = get_env
+    """ manages a collection of worker processes that
+    produce data to be consumed by the client of this class.
+    """
+    def __init__(self, num_workers, worker_target, args):
+        """ Construct
+        :param num_workers: the number of worker processes
+        :param worker_target: function for each worker process to execute
+        :param args: the aforementioned additional
+        arguments to be passed to each worker
+        """
+        self.num_workers = num_workers
+        self.worker_target = worker_target
+        self.args = args
 
         self.queue = None
+        self.sema = None
+        self._workers = None
 
-    def __enter__(self):
+    def open(self):
+        """ creates the collection of managed worker processes """
         self.queue = Queue()
-        self.workers = []
-        for w in range(self.num_envs):
+        self.sema = Semaphore(0)
 
-            args = (w, self.queue, self.get_rollout, self.make_model, self.get_env, self.model_directory)
-
-            worker = Process(target=worker_task, args=args)
+        self._workers = []
+        for wid in range(self.num_workers):
+            worker = Process(target=self.worker_target,
+                             args=(wid, self.queue, self.sema) + self.args)
             worker.start()
-            self.workers.append(worker)
+            self._workers.append(worker)
 
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def close(self):
+        """ destroys the worker processes """
         del self.queue
-        for worker in self.workers:
+        for worker in self._workers:
             worker.terminate()
             worker.join()
 
-    def await_rollout(self):
+    def start(self):
+        """ signals all worker processes to begin """
+        for _ in range(self.num_workers):
+            self.sema.release()
+
+    def pop(self):
+        """ blocks until there is a datum in the queue
+        produced by a worker, then removes and returns it.
+        """
         if self.queue is None:
-            raise Exception
+            raise Exception()
         return self.queue.get()
 
+    def __enter__(self):
+        self.open()
+        return self
 
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()

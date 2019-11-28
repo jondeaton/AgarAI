@@ -144,8 +144,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="CartPole-v1",
-                             choices=["CartPole-v1", "agario-grid-v0",
+    env_options.add_argument("--env", default="agario-grid-v0",
+                             choices=["agario-grid-v0", "CartPole-v1",
                                       "RoboschoolHalfCheetah-v1"])
 
     output_options = parser.add_argument_group("Output")
@@ -160,9 +160,6 @@ def parse_args():
                                   help="Number of epochs to train")
     hyperams_options.add_argument('-async', '--asynchronous', dest='asynchronous',
                                   action='store_true', help="")
-
-    training_options = parser.add_argument_group("Training")
-    training_options.add_argument("-gpu", "--gpu", action='store_true', help="Enable GPU")
 
     logging_group = parser.add_argument_group("Logging")
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],

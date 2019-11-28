@@ -39,12 +39,15 @@ class Rollout:
         self.values.append(values)
         self.dones.append(dones)
 
-    def as_batch(self):
-        """ returns the roll-out as a batch of experiences (will cache) """
+    def as_batch(self, cache=True):
+        """ returns the roll-out as a batch of experiences (optinoally cache) """
         if self._batch is not None:
             return self._batch
-        self._batch = self._to_batch()
-        return self.as_batch()
+        if cache:
+            self._batch = self._to_batch()
+            return self._batch
+        else:
+            return self._to_batch()
 
     def _to_batch(self):
         """ converts the recorded roll-out to a batch of experiences """
