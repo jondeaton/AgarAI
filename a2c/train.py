@@ -144,8 +144,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="CartPole-v1",
-                             choices=["CartPole-v1", "agario-grid-v0",
+    env_options.add_argument("--env", default="agario-grid-v0",
+                             choices=["agario-grid-v0", "CartPole-v1",
                                       "RoboschoolHalfCheetah-v1"])
 
     output_options = parser.add_argument_group("Output")
