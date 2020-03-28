@@ -9,7 +9,7 @@ import argparse, logging
 import gym, gym_agario
 import numpy as np
 
-from a2c_jax.training import Trainer
+from jax.training import Trainer
 
 logger = logging.getLogger("root")
 logger.propagate = False
@@ -66,7 +66,7 @@ def make_environment(env_name, hyperams):
 
 
 def agario_to_action(index, action_shape):
-    """ converts a raw action index into an Agario action """
+    """ Converts a raw action index into an Agario action """
     if index is None:
         return None
     if type(index) is not int:
@@ -141,12 +141,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="agario-grid-v0",
-                             choices=["agario-grid-v0"])
+    env_options.add_argument("--env", default="agario-grid-v0", choices=["agario-grid-v0"])
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")
-    output_options.add_argument("--name", default="a2c", help="Experiment or run name")
+    output_options.add_argument("--name", default="jax-debug", help="Experiment or run name")
     output_options.add_argument("--debug", action="store_true", help="Debug mode")
 
     hyperams_options = parser.add_argument_group("HyperParameters")

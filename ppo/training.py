@@ -20,7 +20,6 @@ import multiprocessing as mp
 import jax.numpy as jnp
 from jax import jit, random
 
-
 # Limit operations to single thread when on CPU.
 os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
 
@@ -53,6 +52,7 @@ def get_rollout(model, env, agents_per_env, episode_length, to_action, record=Tr
 
     return rollout
 
+
 def _update_with_rollout(model, rollout_batch):
     """ updates the network using a roll-out """
 
@@ -72,12 +72,8 @@ def _update_with_rollout(model, rollout_batch):
 
 
 def worker_fn(wid, model, optimizer):
-    
-
     rollout = get_rollout(model)
     gradients = compute_gradients(model, rollout)
-
-
 
 
 class Trainer:
@@ -97,8 +93,40 @@ class Trainer:
         else:
             self._train_sync()
 
+    def _train_ppo(self):
+        env = self.get_env()
+
+        input_shape = (None,) + env.observation_space.shape
+        model = make_model(self.hyperams.architecture,
+                           self.hyperams.encoder_class,
+                           input_shape,
+                           self.hyperams.action_shape)
+
+        self.optimizer = tf.keras.optimizers.Adam(lr=self.hyperams.learning_rate, clipnorm=1.0)
+
+        summary_writer = None
+        if self.training_dir is not None:
+            model_directory = os.path.join(self.training_dir, "model")
+            summary_writer = tf.summary.create_file_writer(self.training_dir)
+
+        for ep in range(self.hyperams.num_episodes):
+            logger.info(f"Episode {ep}")
+            episode_length = self.hyperams.episode_length
+            rollout = get_rollout(model, env,
+                                  self.hyperams.agents_per_env,
+                                  episode_length,
+                                  self.to_action)
+
+            losses = self._update_with_rollout(model, rollout.as_batch())
+            self._log_rollout(summary_writer, ep, rollout.as_batch(), losses)
+
+            if self.training_dir is not None and ep % self.hyperams.save_frequency == 0:
+                logger.info("Saving model checkpoint.")
+                model.save_weights(model_directory)
+
+
     def _train_sync(self):
-        pass
+        raise NotImplementedError()
 
     def _train_async(self):
         """ trains a model asynchronously """
@@ -115,7 +143,6 @@ class Trainer:
                 process = context.Process(target=worker_fn, args=args)
                 workers.append(process)
         logger.info(f"Workers spawned...")
-
 
         model_directory = os.path.join(self.training_dir, "model")
 
