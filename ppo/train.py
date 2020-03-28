@@ -9,7 +9,7 @@ import argparse, logging
 import gym, gym_agario
 import numpy as np
 
-from a2c_jax.training import Trainer
+from ppo.training import Trainer
 
 logger = logging.getLogger("root")
 logger.propagate = False
@@ -55,6 +55,7 @@ def make_environment(env_name, hyperams):
         # observation parameters
         env_config.update({
             "grid_size":       hyperams.grid_size,
+            "num_frames":      1,
             "observe_cells":   hyperams.observe_cells,
             "observe_others":  hyperams.observe_others,
             "observe_viruses": hyperams.observe_viruses,
@@ -66,7 +67,7 @@ def make_environment(env_name, hyperams):
 
 
 def agario_to_action(index, action_shape):
-    """ converts a raw action index into an Agario action """
+    """ Converts a raw action index into an Agario action """
     if index is None:
         return None
     if type(index) is not int:
@@ -85,7 +86,7 @@ def main():
     setup_logger(args, logger)
 
     if args.env == "agario-grid-v0":
-        from a2c.hyperparameters import GridEnvHyperparameters
+        from ppo.hyperparameters import GridEnvHyperparameters
         hyperams = GridEnvHyperparameters()
         to_action = lambda i: agario_to_action(i, hyperams.action_shape)
     else:
@@ -115,7 +116,7 @@ def main():
 
     trainer = Trainer(get_env, hyperams, to_action, test_env=test_env, training_dir=training_dir)
 
-    trainer.train(asynchronous=hyperams.asynchronous)
+    trainer.train()
 
     logger.debug("Exiting.")
 
@@ -141,21 +142,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train A2C Agent")
 
     env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="agario-grid-v0",
-                             choices=["agario-grid-v0"])
+    env_options.add_argument("--env", default="agario-grid-v0", choices=["agario-grid-v0"])
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")
-    output_options.add_argument("--name", default="a2c", help="Experiment or run name")
+    output_options.add_argument("--name", default="ppo-debug", help="Experiment or run name")
     output_options.add_argument("--debug", action="store_true", help="Debug mode")
-
-    hyperams_options = parser.add_argument_group("HyperParameters")
-    # note: make sure that the "dest" value is exactly the same as the
-    # variable name in "Hyperparameters" in order for over-riding to work correctly.
-    hyperams_options.add_argument("-episodes", "--episodes", dest="num_episodes", type=int,
-                                  help="Number of epochs to train")
-    hyperams_options.add_argument('-async', '--asynchronous', dest='asynchronous',
-                                  action='store_true', help="")
 
     logging_group = parser.add_argument_group("Logging")
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
