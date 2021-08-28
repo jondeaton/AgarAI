@@ -2,25 +2,26 @@
 
 Example usage:
 
-import configuration
+    import configuration
 
-env_name = configuration.gym_env_name(config.environment)
-env_config = configuration.gym_env_config(config.environment)
-env = gym.make(env_name, **env_config)
-
+    env_name = configuration.gym_env_name(config.environment)
+    env_config = configuration.gym_env_config(config.environment)
+    env = gym.make(env_name, **env_config)
 """
 import os
 from typing import *
 
 from google.protobuf import text_format
-from configuration import config_pb2
+from . import config_pb2
+from . import environment_pb2
 
 Config = config_pb2.Config
-Agario = config_pb2.Config.Agario
-Environment = config_pb2.Config.Environment
-Observation = config_pb2.Config.Environment.Observation
-Action = config_pb2.Config.Environment.Action
-HyperParameters = config_pb2.Config.HyperParameters
+
+Agario = environment_pb2.Agario
+Environment = environment_pb2.Environment
+Observation = environment_pb2.Observation
+Action = environment_pb2.Action
+HyperParameters = config_pb2.HyperParameters
 
 
 def _configs_dir() -> str:
@@ -32,7 +33,7 @@ def load(name: str) -> Config:
     """Gets a configuration by name."""
     config_path = os.path.join(_configs_dir(), f'{name}.textproto')
     with open(config_path, 'r') as f:
-        return text_format.Parse(f, Config())
+        return text_format.MergeLines(f, Config())
 
 
 _gym_names = {
