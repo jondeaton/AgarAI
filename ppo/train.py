@@ -1,13 +1,24 @@
-
+import functools
 import os, sys
 import argparse, logging
 from typing import *
 
 import gym, gym_agario
 import configuration
+from configuration import config_pb2, environment_pb2
+
+import rollout
+from ppo import utils
 
 import jax
 from jax import numpy as np
+import numpy as onp
+
+from jax.experimental import stax
+from jax.experimental import optimizers
+
+from tqdm import tqdm
+
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # If its not an error then fuck off.
 import tensorflow as tf
@@ -16,57 +27,6 @@ tf.config.experimental.set_visible_devices([], "GPU")  # no GPU for U, bitch.
 # Limit operations to single thread when on CPU.
 # todo: Do I need this???
 # os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-
-
-def make_test_env(env_name, hyperams):
-    """ creates an environment for testing """
-    return gym.make(env_name, **{
-        'num_agents': 8,
-        'difficulty': 'normal',
-        'ticks_per_step': hyperams.ticks_per_step,
-        'arena_size': 500,
-        'num_pellets': 1000,
-        'num_viruses': 25,
-        'num_bots': 25,
-        'pellet_regen': True,
-
-        "grid_size": hyperams.grid_size,
-        "observe_cells": hyperams.observe_cells,
-        "observe_others": hyperams.observe_others,
-        "observe_viruses": hyperams.observe_viruses,
-        "observe_pellets": hyperams.observe_pellets
-    })
-
-
-def make_environment(env_name, hyperams):
-    """ makes and configures the specified OpenAI gym environment """
-
-    env_config = dict()
-
-    if env_name == "agario-grid-v0":
-        env_config = {
-                'num_agents':      hyperams.agents_per_env,
-                'difficulty':      hyperams.difficulty,
-                'ticks_per_step':  hyperams.ticks_per_step,
-                'arena_size':      hyperams.arena_size,
-                'num_pellets':     hyperams.num_pellets,
-                'num_viruses':     hyperams.num_viruses,
-                'num_bots':        hyperams.num_bots,
-                'pellet_regen':    hyperams.pellet_regen,
-            }
-
-        # observation parameters
-        env_config.update({
-            "grid_size":       hyperams.grid_size,
-            "num_frames":      1,
-            "observe_cells":   hyperams.observe_cells,
-            "observe_others":  hyperams.observe_others,
-            "observe_viruses": hyperams.observe_viruses,
-            "observe_pellets": hyperams.observe_pellets
-        })
-
-    env = gym.make(env_name, **env_config)
-    return env
 
 
 def agario_to_action(index, action_shape):
@@ -84,14 +44,18 @@ def agario_to_action(index, action_shape):
     return np.array([x, y]), act
 
 
-def action_size(action_config: configuration.Action) -> int:
+def action_size(action_config: environment_pb2.Action) -> int:
+    # todo: fix this
     num_acts = int(action_config.allow_splitting) + int(action_config.allow_feeing)
     move_size = action_config.num_directions * action_config.num_magnitudes
     return 1 + move_size + action_config.num_directions * num_acts
 
 
-def get_action_converter(action_config: configuration.Action) -> Callable:
-
+def get_action_converter(action_config: environment_pb2.Action) -> Callable:
+    """Creates function to turn what comes out of the model into an
+    action that can go into the environment.
+    """
+    # todo: fix this
     def index_to_action(indexg: int):
         return np.array([0, 0]), 0
         # if index == 0:
@@ -112,42 +76,75 @@ def get_action_converter(action_config: configuration.Action) -> Callable:
     return index_to_action
 
 
+def make_feature_extractor(output_size: int, mode: str) -> Tuple[Callable, Callable]:
+    SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
+    return stax.serial(
+        stax.Conv(32, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
+        stax.Conv(32, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
+        stax.Conv(10, filter_shape=(3, 3), padding='SAME'), stax.BatchNorm(), SiLu, stax.Dropout(0.3, mode=mode),
+        stax.Conv(10, filter_shape=(3, 3), padding='SAME'), SiLu, stax.Dropout(0.3, mode=mode),
+        stax.Flatten,
+        stax.Dense(output_size))
+
+
+def make_actor_critic(model_config, num_actions, mode: str):
+    num_features = model_config.feature_extractor.num_features
+
+    fe_init, fe_fn = make_feature_extractor(num_features, mode='train')
+    actor_init, actor_fn = stax.Dense(num_actions)
+    critic_init, critic_fn = stax.Dense(1)
+
+    def init_fn(key, input_shape):
+        return (
+            fe_init(key, input_shape),
+            actor_init(key, (num_features, )),
+            critic_init(key, (num_features, ))
+        )
+
+    def apply_fn(params, observations):
+        fe_params, actor_params, critic_params = params
+        features = fe_fn(fe_params, observations)
+        return actor_fn(features), critic_fn(features)
+
+    return init_fn, apply_fn
 
 
 def train(env: gym.Env, config: configuration.Config,
           test_env: Optional[gym.Env] = None,
           training_dir: Optional[str] = None):
     """Trains agent."""
+    hps = config.hyperparameters
 
     input_shape = (1,) + env.observation_space.shape
+    num_actions = action_size(config.environment.action)
+    to_action = get_action_converter(config.environment.action)
 
-    model_def = CNN.partial(action_shape=np.prod(self.hp.action_shape))
-    _, model = model_def.create_by_shape(self.key, [(input_shape, dtype)])
-    optimizer = optim.Adam(learning_rate=self.hp.learning_rate).create(model)
+    init_fn, apply_fn = make_actor_critic(config.model, num_actions, 'train')
 
-    if training_dir is not None:
-        model_directory = os.path.join(self.training_dir, "model")
-        summary_writer = tf.summary.create_file_writer(self.training_dir)
-    else:
-        summary_writer = None
-    
-    for ep in range(self.hp.num_episodes):
+    key = jax.random.PRNGKey(hps.seed)
+    _, params = init_fn(key, input_shape)
+
+    adam_init, adam_update, get_params = optimizers.adam(hps.lr)
+    adam_state = adam_init(params)
+
+    step = 0
+    for ep in range(hps.num_episodes):
         logging.info(f"Episode {ep}")
 
         # Perform a rollout.
-        rollout = Rollout()
+        roll = rollout.Rollout()
         observations = env.reset()
-        dones = [False] * self.hp.agents_per_env
-        for _ in tqdm(range(self.hp.episode_length)):
+        dones = [False] * hps.agents_per_env
+        for _ in tqdm(range(hps.episode_length)):
             if all(dones): break
-            action_logits, values_estimate = model(observations)
-            action_indices = jax.random.categorical(self.key, action_logits)  # Choose actions.
-            log_pas = take_along(nn.log_softmax(action_logits), action_indices)
-            values = list(jnp.squeeze(values_estimate))
-            actions = [self.to_action(i) for i in action_indices]
+            action_logits, values_estimate = apply_fn(observations)
+            action_indices = jax.random.categorical(key, action_logits)  # Choose actions.
+            log_pas = utils.take_along(jax.nn.log_softmax(action_logits), action_indices)
+            values = list(np.squeeze(values_estimate))
+            actions = [to_action(i) for i in action_indices]
             next_obs, rewards, next_dones, _ = env.step(actions)
 
-            rollout.record({
+            roll.record({
                 "observations": observations,
                 "actions": action_indices,
                 "rewards": rewards,
@@ -159,39 +156,34 @@ def train(env: gym.Env, config: configuration.Config,
             observations = next_obs
 
         # Optimize the proximal policy.
-        observations = jnp.array(rollout.batched('observations'))
-        actions = jnp.array(rollout.batched('actions'))
-        log_pas = jnp.array(rollout.batched('log_pas'))
-        dones = jnp.array(rollout.batched('dones'))
-        values = jnp.array(rollout.batched('values'))
+        observations = np.array(roll.batched('observations'))
+        actions = np.array(roll.batched('actions'))
+        log_pas = np.array(roll.batched('log_pas'))
+        dones = np.array(roll.batched('dones'))
+        values = np.array(roll.batched('values'))
 
-        rewards = rollout.batched('rewards')
-        returns = jnp.array(make_returns_batch(rewards, self.hp.gamma))
+        rewards = roll.batched('rewards')
+        returns = np.array(utils.make_returns_batch(rewards, hps.gamma))
         advantages = returns - values
 
-        for step in range(self.hp.num_sgd_steps):
-            dones = combine_dims(dones)
+        for _ in range(hps.num_sgd_steps):
+            dones = utils.combine_dims(dones)
+            observations = utils.combine_dims(observations)[np.logical_not(dones)]
+            actions = utils.combine_dims(actions)[np.logical_not(dones)]
+            advantages = utils.combine_dims(advantages)[np.logical_not(dones)]
+            returns = utils.combine_dims(returns)[np.logical_not(dones)]
+            log_pas = utils.combine_dims(log_pas)[np.logical_not(dones)]
 
-            observations = combine_dims(observations)[jnp.logical_not(dones)]
-            actions = combine_dims(actions)[jnp.logical_not(dones)]
-            advantages = combine_dims(advantages)[jnp.logical_not(dones)]
-            returns = combine_dims(returns)[jnp.logical_not(dones)]
-            log_pas = combine_dims(log_pas)[jnp.logical_not(dones)]
+            params = get_params()
+            dparams = jax.grad(
+                functools.partial(utils.loss, apply_fn)
+            )(params, observations, actions, advantages, returns, log_pas)
 
-            optimizer = train_step(optimizer, observations, actions, advantages, returns, log_pas)
+            adam_state = adam_update(step, dparams, adam_state)
+            step += 1
 
 def main():
     args = parse_args()
-
-    if args.env == "agario-grid-v0":
-        from ppo.hyperparameters import GridEnvHyperparameters
-        hyperams = GridEnvHyperparameters()
-        to_action = lambda i: agario_to_action(i, hyperams.action_shape)
-    else:
-        raise ValueError(args.env)
-
-    hyperams.override(args)
-    logging.debug(f"Environment: {args.env}")
 
     if args.debug:
         logging.warning(f"Debug mode on. Model will not be saved")
@@ -204,8 +196,8 @@ def main():
         os.makedirs(training_dir, exist_ok=True)
         logging.info(f"Model directory: {training_dir}")
 
-
-    config = configuration.load_config(args.config)
+    config = configuration.load(args.config)
+    print(f'Training config: {config}')
 
     # Train Environment.
     train_env = gym.make(
@@ -213,9 +205,13 @@ def main():
         **configuration.gym_env_config(config.environment))
 
     # Test Environment
+    test_environment_config = (
+      config.test_environment if config.HasField('test_environment')
+      else config.environment
+    )
     test_env = gym.make(
-        configuration.gym_env_name(config.test_environment),
-        **configuration.gym_env_config(config.test_environment))
+        configuration.gym_env_name(test_environment_config),
+        **configuration.gym_env_config(test_environment_config))
 
     train(train_env, config, test_env=test_env, training_dir=training_dir)
     logging.debug("Exiting.")
@@ -243,13 +239,10 @@ def parse_args():
 
     parser.add_argument('--config', default=None, required=True, help="Configuration name.")
 
-    env_options = parser.add_argument_group("Environment")
-    env_options.add_argument("--env", default="agario-grid-v0", choices=["agario-grid-v0"])
-
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")
-    output_options.add_argument("--name", default="ppo-debug", help="Experiment or run name")
-    output_options.add_argument("--debug", action="store_true", help="Debug mode")
+    output_options.add_argument("--name", default="ppo", help="Experiment or run name")
+    output_options.add_argument("--debug", action="store_true", help="Debug mode.")
 
     logging_group = parser.add_argument_group("Logging")
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],

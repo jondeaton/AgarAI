@@ -1,7 +1,9 @@
+# proto-file: configuration/config.proto
+# proto-message: Config
 
-
-
-
-
-
-
+environment {
+  agario {
+    difficulty: TRIVIAL
+  }
+  observation { type: GRID }
+}
