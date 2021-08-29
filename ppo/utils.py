@@ -2,6 +2,8 @@
 
 import jax
 from jax import numpy as np
+import numpy as onp
+
 from typing import *
 
 
@@ -10,20 +12,12 @@ def take_along(x: np.ndarray, i: np.ndarray) -> np.ndarray:
     return x.take(i + np.arange(x.shape[0]) * x.shape[1])
 
 
-@jax.jit
-def one_hot(labels, num_classes, on_value=1.0, off_value=0.0):
-  x = (labels[..., None] == np.arange(num_classes)[None])
-  x = jax.lax.select(x, np.full(x.shape, on_value), np.full(x.shape, off_value))
-  return x.astype(np.float32)
-
-
-@jax.jit
 def actor_loss(
     action_logits, values, actions, advantages, log_pa,
         clip_eps: float = 0.01):
     """PPO Actor Loss."""
 
-    new_log_pas = jax.nn.log_softmax(action_logits) * one_hot(actions, action_logits.shape[1])
+    new_log_pas = jax.nn.log_softmax(action_logits) * jax.nn.one_hot(actions, action_logits.shape[1])
     new_log_pa = take_along(new_log_pas, actions)
     ratio = np.exp(new_log_pa - log_pa)
     loss = np.minimum(
@@ -55,10 +49,9 @@ def train_step(optimizer, observations, actions, advantages, returns, log_pa):
     return optimizer
 
 
-
-@jax.jit
-def loss(apply_fn, params, observations, actions, advantages, returns, log_pa):
-    action_logits, values = apply_fn(observations)
+def loss(apply_fn, params, observations, actions, advantages, returns, log_pa,
+         rng: Optional[jax.random.PRNGKey] = None):
+    action_logits, values = apply_fn(params, observations, rng=rng)
     loss_actor = actor_loss(action_logits, values, actions, advantages, log_pa)
     loss_critic = critic_loss(action_logits, values, returns)
     return loss_actor + loss_critic
@@ -82,22 +75,23 @@ def get_efficiency(rewards: np.ndarray,
     return efficiency
 
 
-def make_returns(rewards: np.ndarray, gamma: float) -> np.ndarray:
+def make_returns(rewards: onp.ndarray, gamma: float) -> onp.ndarray:
     """ Calculates the discounted future returns for a single rollout
     :param rewards: numpy array containing rewards
     :param gamma: discount factor 0 < gamma < 1
     :return: numpy array containing discounted future returns
     """
-    returns = np.zeros_like(rewards)
-
+    # todo: make this jittable in jax
+    returns = onp.zeros_like(rewards)
     ret = 0.0
     for i in reversed(range(len(rewards))):
-        returns[i] = ret = rewards[i] + gamma * ret
+        ret = rewards[i] + gamma * ret
+        returns[i] = ret
 
     return returns
 
 
-def make_returns_batch(reward_batch: List[np.ndarray], gamma: float) -> List[np.ndarray]:
+def make_returns_batch(reward_batch: List[onp.ndarray], gamma: float) -> List[onp.ndarray]:
     """ Calculates discounted episodes returns
     :param reward_batch: list of numpy arrays. Each numpy array is
     the episode rewards for a single episode in the batch
@@ -105,3 +99,4 @@ def make_returns_batch(reward_batch: List[np.ndarray], gamma: float) -> List[np.
     :return: list of numpy arrays representing the returns
     """
     return [make_returns(rewards, gamma) for rewards in reward_batch]
+

@@ -3,13 +3,14 @@
 syntax = "proto2";
 
 package configuration;
-import "configuration/environment.proto";
+import "environment.proto";
 
 message HyperParameters {
     optional int64 seed = 1 [default = 0];
 
     optional float learning_rate = 2;
     optional int64 num_episodes = 3;
+    optional int64 episode_length = 9;
 
     optional float gamma = 4;
 
@@ -23,12 +24,6 @@ message HyperParameters {
 
 message Model {
     message FeatureExtractor {
-        enum Type {
-            UNKNOWN = 1;
-            DNN = 2;
-            CNN = 3;
-        }
-        optional Type type = 1;
         optional int64 num_features = 2;
     }
     optional FeatureExtractor feature_extractor = 1;

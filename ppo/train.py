@@ -29,7 +29,7 @@ tf.config.experimental.set_visible_devices([], "GPU")  # no GPU for U, bitch.
 # os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
 
 def action_size(action_config: environment_pb2.Action) -> int:
-    num_acts = 1 + int(action_config.allow_splitting) + int(action_config.allow_feeding)
+    num_acts = int(action_config.allow_splitting) + int(action_config.allow_feeding)
     move_size = action_config.num_directions * action_config.num_magnitudes
     return 1 + move_size + action_config.num_directions * num_acts
 
@@ -91,7 +91,7 @@ def make_action_converter(action_config: environment_pb2.Action):
 
     @jax.jit
     def action_converter(index: int) -> AgarioAction:
-        do_nothing = np.array([0, 0]), 0
+        do_nothing = np.array([0, 0], dtype=np.float32), 0
         return jax.lax.cond(
             index == 0,
             lambda _: do_nothing,
@@ -129,16 +129,20 @@ def make_actor_critic(model_config: config_pb2.Model,
     critic_init, critic_fn = stax.Dense(1)
 
     def init_fn(key, input_shape):
-        return (
-            fe_init(key, input_shape),
-            actor_init(key, (num_features, )),
-            critic_init(key, (num_features, ))
-        )
+        input_shape, fe_params = fe_init(key, input_shape)
+        _, actor_params = actor_init(key, (num_features, ))
+        _, critic_params = critic_init(key, (num_features, ))
+        params = fe_params, actor_params, critic_params
+        return input_shape, params
 
-    def apply_fn(params, observations):
+    @jax.jit
+    def apply_fn(params, observations, rng: Optional[jax.random.PRNGKey] = None):
+        observations = observations.astype(np.float32)
         fe_params, actor_params, critic_params = params
-        features = fe_fn(fe_params, observations)
-        return actor_fn(features), np.squeeze(critic_fn(features))
+        features = fe_fn(fe_params, observations, rng=rng)
+        actor_output = actor_fn(actor_params, features, rng=rng)
+        critic_output = np.squeeze(critic_fn(critic_params, features, rng=rng))
+        return actor_output, critic_output
 
     return init_fn, apply_fn
 
@@ -158,25 +162,28 @@ def train(env: gym.Env, config: configuration.Config,
     key = jax.random.PRNGKey(hps.seed)
     _, params = init_fn(key, input_shape)
 
-    adam_init, adam_update, get_params = optimizers.adam(hps.lr)
+    adam_init, adam_update, get_params = optimizers.adam(hps.learning_rate)
     adam_state = adam_init(params)
 
     step = 0
     for ep in range(hps.num_episodes):
         logging.info(f"Episode {ep}")
 
+        params = get_params(adam_state)
+
         # Perform a rollout.
         roll = rollout.Rollout()
         observations = env.reset()
-        dones = [False] * hps.agents_per_env
+        dones = [False] * config.environment.num_agents
         for _ in tqdm(range(hps.episode_length)):
+            _, key = jax.random.split(key)
             if all(dones): break
-            action_logits, values_estimate = apply_fn(observations)
+            action_logits, values_estimate = apply_fn(params, np.array(observations), rng=key)
             action_indices = jax.random.categorical(key, action_logits)  # Choose actions.
             # todo: take along isn't right here...
             log_pas = utils.take_along(jax.nn.log_softmax(action_logits), action_indices)
-            values = list(values_estimate)
-            actions = jax.vmap(action_converter)(action_indices)
+            values = values_estimate
+            actions = list(zip(*jax.vmap(action_converter)(action_indices)))
             next_obs, rewards, next_dones, _ = env.step(actions)
 
             roll.record({
@@ -190,7 +197,6 @@ def train(env: gym.Env, config: configuration.Config,
             dones = next_dones
             observations = next_obs
 
-        # Optimize the proximal policy.
         observations = np.array(roll.batched('observations'))
         actions = np.array(roll.batched('actions'))
         log_pas = np.array(roll.batched('log_pas'))
@@ -198,22 +204,28 @@ def train(env: gym.Env, config: configuration.Config,
         values = np.array(roll.batched('values'))
 
         rewards = roll.batched('rewards')
+        g = np.array(rewards).sum(axis=1)
+        print(f'total rewards: {g}')
+
         returns = np.array(utils.make_returns_batch(rewards, hps.gamma))
         advantages = returns - values
 
-        for _ in range(hps.num_sgd_steps):
-            dones = utils.combine_dims(dones)
-            observations = utils.combine_dims(observations)[np.logical_not(dones)]
-            actions = utils.combine_dims(actions)[np.logical_not(dones)]
-            advantages = utils.combine_dims(advantages)[np.logical_not(dones)]
-            returns = utils.combine_dims(returns)[np.logical_not(dones)]
-            log_pas = utils.combine_dims(log_pas)[np.logical_not(dones)]
+        dones = utils.combine_dims(dones)
+        observations = utils.combine_dims(observations)[np.logical_not(dones)]
+        actions = utils.combine_dims(actions)[np.logical_not(dones)]
+        advantages = utils.combine_dims(advantages)[np.logical_not(dones)]
+        returns = utils.combine_dims(returns)[np.logical_not(dones)]
+        log_pas = utils.combine_dims(log_pas)[np.logical_not(dones)]
 
-            params = get_params()
-            dparams = jax.grad(
+        dparams_fn = jax.jit(
+            jax.grad(
                 functools.partial(utils.loss, apply_fn)
-            )(params, observations, actions, advantages, returns, log_pas)
-
+            )
+        )
+        for _ in tqdm(range(hps.num_sgd_steps)):
+            _, key = jax.random.split(key)
+            params = get_params(adam_state)
+            dparams = dparams_fn(params, observations, actions, advantages, returns, log_pas, rng=key)
             adam_state = adam_update(step, dparams, adam_state)
             step += 1
 
@@ -233,7 +245,6 @@ def main():
         logging.info(f"Model directory: {training_dir}")
 
     config = configuration.load(args.config)
-    print(f'Training config: {config}')
 
     # Train Environment.
     train_env = gym.make(
