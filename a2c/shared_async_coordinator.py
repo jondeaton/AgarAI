@@ -31,7 +31,7 @@ def get_rollout(env: RemoteEnvironment, episode_length, initialize, get_actions,
             act_in = list(map(to_action, actions))
             next_obs, rewards, dones, _ = env.step(act_in)
 
-            rollout.record(observations, actions, rewards, values, dones)
+            rollout.record_step(observations, actions, rewards, values, dones)
             observations = next_obs
 
     return rollout

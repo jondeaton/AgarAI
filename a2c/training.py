@@ -87,14 +87,14 @@ def get_rollout(model, env, agents_per_env, episode_length, to_action,
         actions = tf.squeeze(tf.random.categorical(action_logits, 1), axis=-1).numpy()
 
         # reshape the critic's value estimations
-        # todo: im only like 90% sure that this is part is corect...
+        # todo: im only like 90% sure that this is part is correct...
         squeeze_axes = [1, 2] if model.recurrent else 1
         values = list(tf.squeeze(est_values, axis=squeeze_axes).numpy())
 
         next_obs, rewards, next_dones, _ = env.step(list(map(to_action, actions)))
 
         if record:
-            rollout.record(observations, actions, rewards, values, dones)
+            rollout.record_step(observations, actions, rewards, values, dones)
         dones = next_dones
         observations = next_obs
 

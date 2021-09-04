@@ -1,0 +1,35 @@
+# proto-file: configuration/config.proto
+# proto-message: Config
+
+environment {
+  num_agents: 16
+  agario {
+    difficulty: EMPTY
+    num_pellets: 1000
+    arena_size: 1000
+    num_viruses: 0
+    num_bots: 0
+  }
+  observation {
+    type: GRID
+    ticks_per_step: 2
+  }
+  action {
+    num_directions: 8
+    num_magnitudes: 2
+  }
+}
+model {
+  feature_extractor {
+    num_features: 128
+  }
+}
+hyperparameters {
+  num_episodes: 10000
+  episode_length: 256
+
+  num_sgd_steps: 1
+
+  learning_rate: 0.0001
+  gamma: 0.99
+}

@@ -1,0 +1,47 @@
+// Configures training.
+
+syntax = "proto2";
+
+package configuration;
+import "environment.proto";
+
+message HyperParameters {
+    optional int64 seed = 1 [default = 0];
+
+    optional float learning_rate = 2;
+    optional int64 num_episodes = 3;
+    optional int64 episode_length = 9;
+
+    optional float gamma = 4;
+
+    optional bool batch = 5;
+    optional int64 batch_size = 6;
+
+    optional int64 num_sgd_steps = 8;
+
+    optional int64 num_environments = 7;
+}
+
+message Model {
+    message FeatureExtractor {
+        optional int64 num_features = 2;
+    }
+    optional FeatureExtractor feature_extractor = 1;
+}
+
+message Config {
+    optional Environment environment = 1;
+    optional Environment test_environment = 2;
+
+    optional HyperParameters hyperparameters = 3;
+
+    optional Model model = 4;
+
+    message Training {
+        optional int64 save_frequency = 1;
+    }
+    optional Training training = 5;
+}
+
+
+

@@ -1,5 +1,7 @@
 # Just some general utilities
 
+from utils import rollout
+
 def is_None(x):
     return x is None
 

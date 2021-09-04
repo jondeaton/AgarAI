@@ -1,14 +1,17 @@
-"""
-File: rollout
-Date: 9/18/19 
-Author: Jon Deaton (jonpauldeaton@gmail.com)
-"""
+"""Class for helping keep track of RL rollouts."""
 
 import numpy as np
-from utils import none_filter
-from typing import List
+from typing import *
 
 from collections import defaultdict
+
+
+def is_not_None(x):
+    return x is not None
+
+
+def none_filter(l):
+    return filter(is_not_None, l)
 
 
 def transpose_batch(collection: List[np.ndarray]) -> List[np.ndarray]:
@@ -43,17 +46,6 @@ class Rollout:
 
     def batched(self, item):
         return transpose_batch(self[item])
-
-    # The old API is below
-    def as_batch(self, cache=True):
-        """ Returns the roll-out as a batch of experiences (optionally cache) """
-        if self._batch is not None:
-            return self._batch
-        if cache:
-            self._batch = self._to_batch()
-            return self._batch
-        else:
-            return self._to_batch()
 
     def record_step(self, observations=None, actions=None, rewards=None, values=None, dones=None):
         """ Records a single step forwards for each agent in in the batch """
