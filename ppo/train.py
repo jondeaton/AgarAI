@@ -42,10 +42,10 @@ def make_actor_critic(model_config: config_pb2.Model,
     def make_feature_extractor(output_size: int, mode: str) -> Tuple[Callable, Callable]:
         SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
         return stax.serial(
-            stax.Conv(32, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
-            stax.Conv(32, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
-            stax.Conv(10, filter_shape=(3, 3), padding='SAME'), stax.BatchNorm(), SiLu, stax.Dropout(0.3, mode=mode),
-            stax.Conv(10, filter_shape=(3, 3), padding='SAME'), SiLu, stax.Dropout(0.3, mode=mode),
+            stax.Conv(8, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
+            stax.Conv(8, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
+            stax.Conv(4, filter_shape=(3, 3), padding='SAME'), stax.BatchNorm(), SiLu, stax.Dropout(0.3, mode=mode),
+            stax.Conv(4, filter_shape=(3, 3), padding='SAME'), SiLu, stax.Dropout(0.3, mode=mode),
             stax.Flatten,
             stax.Dense(output_size))
 
@@ -72,6 +72,54 @@ def make_actor_critic(model_config: config_pb2.Model,
     return init_fn, apply_fn
 
 
+def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
+    apply_fn, params = model
+    hps = config.hyperparameters
+    action_converter = action_conversion.make_action_converter(config.environment.action)
+
+    dones = [False] * config.environment.num_agents
+    roll = rollout.MultiRollout()
+
+    observations = env.reset()
+    for i in tqdm(range(hps.episode_length)):
+        if all(dones): break
+
+        _, key = jax.random.split(key)
+        action_logits, values_estimate = apply_fn(params, np.array(observations), rng=key)
+        action_indices = jax.random.categorical(key, action_logits)  # Choose actions.
+        log_pas = utils.take_along(jax.nn.log_softmax(action_logits), action_indices)
+        values = values_estimate
+        actions = list(zip(*jax.vmap(action_converter)(action_indices)))
+        next_obs, rewards, next_dones, _ = env.step(actions)
+
+        roll.record({
+            "observations": observations,
+            "actions": action_indices,
+            "rewards": rewards,
+            "values": values,
+            "log_pas": log_pas,
+            "dones": dones
+        })
+        dones = next_dones
+        observations = next_obs
+
+    # Need to record the final value estimate for all the agents that didn't finish.
+    # that didn't finish. This means that agents which didn't finish will have one additional
+    # observation
+    if not all(dones):
+        _, value_estimates = apply_fn(params, np.array(observations), rng=key)
+        value_estimates = onp.array(value_estimates)
+        value_estimates[dones] = 0.0
+        for agent in range(config.environment.num_agents):
+            roll.record({
+                "values": value_estimates
+            })
+
+    return roll
+
+
+
+
 def train(env: gym.Env, config: configuration.Config,
           test_env: Optional[gym.Env] = None,
           training_dir: Optional[str] = None):
@@ -94,57 +142,46 @@ def train(env: gym.Env, config: configuration.Config,
     for episode in range(hps.num_episodes):
         logging.info(f"Episode {episode}")
 
+        _, key = jax.random.split(key)
+
         params = get_params(adam_state)
+        model = (apply_fn, params)
+        roll = get_rollouts(config, env, model, key=key)
 
-        # Perform a rollout.
-        roll = rollout.Rollout()
-        observations = env.reset()
-        dones = [False] * config.environment.num_agents
-        for _ in tqdm(range(hps.episode_length)):
-            _, key = jax.random.split(key)
-            if all(dones): break
-            action_logits, values_estimate = apply_fn(params, np.array(observations), rng=key)
-            action_indices = jax.random.categorical(key, action_logits)  # Choose actions.
-            # todo: take along isn't right here...
-            log_pas = utils.take_along(jax.nn.log_softmax(action_logits), action_indices)
-            values = values_estimate
-            actions = list(zip(*jax.vmap(action_converter)(action_indices)))
-            next_obs, rewards, next_dones, _ = env.step(actions)
-
-            roll.record({
-                "observations": observations,
-                "actions": action_indices,
-                "rewards": rewards,
-                "values": values,
-                "log_pas": log_pas,
-                "dones": dones
-            })
-            dones = next_dones
-            observations = next_obs
-
+        # Now these are arrays shaped (num_agents, steps, ...)
         observations = np.array(roll.batched('observations'))
         actions = np.array(roll.batched('actions'))
         log_pas = np.array(roll.batched('log_pas'))
         dones = np.array(roll.batched('dones'))
-        values = np.array(roll.batched('values'))
 
+        # Make the returns estimate.
+        # todo: using Monte-Carlo here. Use n-step return or GAE if this doesn't work.
         rewards = roll.batched('rewards')
-        g = np.array(rewards).sum(axis=1)
-        print(f'total rewards: {g}')
-
-        tf.summary.histogram(f'returns',  g, step=step)
-        tf.summary.scalar(f'returns/average', g.mean(), step=step)
-        tf.summary.scalar(f'returns/max', g.max(), step=step)
-
-        returns = np.array(utils.make_returns_batch(rewards, hps.gamma))
-        advantages = returns - values
+        values = roll.batched('values')
+        returns = []
+        for r, v in zip(rewards, values):
+            g = utils.make_returns(r, hps.gamma, end_value=v[-1])
+            returns.append(g)
+        
+        rewards = np.array(rewards)
+        values = np.array(values)[:, :-1]  # clip the last value estimate.
+        returns = np.array(returns)
 
         dones = utils.combine_dims(dones)
-        observations = utils.combine_dims(observations)[np.logical_not(dones)]
-        actions = utils.combine_dims(actions)[np.logical_not(dones)]
-        advantages = utils.combine_dims(advantages)[np.logical_not(dones)]
-        returns = utils.combine_dims(returns)[np.logical_not(dones)]
-        log_pas = utils.combine_dims(log_pas)[np.logical_not(dones)]
+        observations = utils.combine_dims(observations)[~dones]
+        actions = utils.combine_dims(actions)[~dones]
+        values = utils.combine_dims(values)[~dones]
+        returns = utils.combine_dims(returns)[~dones]
+        log_pas = utils.combine_dims(log_pas)[~dones]
+
+        advantages = returns - values
+
+        g = list(rewards.sum(axis=1))
+        print(f'total rewards: {g}, mean: {onp.mean(g)}')
+
+        tf.summary.histogram(f'returns',  g, step=step)
+        tf.summary.scalar(f'returns/average', onp.mean(g), step=step)
+        tf.summary.scalar(f'returns/max', max(g), step=step)
 
         get_loss = jax.jit(functools.partial(utils.loss, apply_fn))
         get_loss_components = jax.jit(functools.partial(utils.loss_components, apply_fn))
@@ -154,6 +191,8 @@ def train(env: gym.Env, config: configuration.Config,
             dparams = jax.grad(get_loss)(*args, **kwargs)
             return jax.tree_map(functools.partial(np.clip, a_min=-0.1, a_max=0.1), dparams)
 
+        num_samples = observations.shape[0]
+        batch_size = 256
         for _ in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
             params = get_params(adam_state)
@@ -162,7 +201,9 @@ def train(env: gym.Env, config: configuration.Config,
             tf.summary.scalar(f'loss/actor', al, step=step)
             tf.summary.scalar(f'loss/critic', cl, step=step)
 
-            dparams = dparams_fn(params, observations, actions, advantages, returns, log_pas, rng=key)
+            i = jax.random.choice(key, np.arange(num_samples), shape=(batch_size, ), replace=False)
+            dparams = dparams_fn(params, observations[i], actions[i], advantages[i],
+                                 returns[i], log_pas[i], rng=key)
             adam_state = adam_update(step, dparams, adam_state)
             step += 1
 
