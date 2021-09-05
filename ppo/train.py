@@ -75,12 +75,15 @@ def make_actor_critic(model_config: config_pb2.Model,
 def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
     apply_fn, params = model
     hps = config.hyperparameters
-    action_converter = action_conversion.make_action_converter(config.environment.action)
+    action_converter = action_conversion.make_action_converter(config.environments[0].action)
 
-    dones = [False] * config.environment.num_agents
     roll = rollout.MultiRollout()
 
     observations = env.reset()
+
+    num_agents = len(observations)
+    dones = [False] * num_agents
+
     for i in tqdm(range(hps.episode_length)):
         if all(dones): break
 
@@ -110,7 +113,7 @@ def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
         _, value_estimates = apply_fn(params, np.array(observations), rng=key)
         value_estimates = onp.array(value_estimates)
         value_estimates[dones] = 0.0
-        for agent in range(config.environment.num_agents):
+        for agent in range(num_agents):
             roll.record({
                 "values": value_estimates
             })
@@ -120,15 +123,15 @@ def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
 
 
 
-def train(env: gym.Env, config: configuration.Config,
+def train(envs: List[gym.Env], config: configuration.Config,
           test_env: Optional[gym.Env] = None,
           training_dir: Optional[str] = None):
     """Trains agent."""
     hps = config.hyperparameters
 
-    input_shape = (1,) + env.observation_space.shape
-    num_actions = action_conversion.action_size(config.environment.action)
-    action_converter = action_conversion.make_action_converter(config.environment.action)
+    input_shape = (1,) + envs[0].observation_space.shape
+    num_actions = action_conversion.action_size(config.environments[0].action)
+    action_converter = action_conversion.make_action_converter(config.environments[0].action)
 
     init_fn, apply_fn = make_actor_critic(config.model, num_actions, 'train')
 
@@ -146,42 +149,65 @@ def train(env: gym.Env, config: configuration.Config,
 
         params = get_params(adam_state)
         model = (apply_fn, params)
-        roll = get_rollouts(config, env, model, key=key)
 
-        # Now these are arrays shaped (num_agents, steps, ...)
-        observations = np.array(roll.batched('observations'))
-        actions = np.array(roll.batched('actions'))
-        log_pas = np.array(roll.batched('log_pas'))
-        dones = np.array(roll.batched('dones'))
+        multi_obs = []
+        multi_actions = []
+        multi_values = []
+        multi_returns = []
+        multi_log_pas = []
+        multi_advantages = []
+        for env in envs:
+            roll = get_rollouts(config, env, model, key=key)
 
-        # Make the returns estimate.
-        # todo: using Monte-Carlo here. Use n-step return or GAE if this doesn't work.
-        rewards = roll.batched('rewards')
-        values = roll.batched('values')
-        returns = []
-        for r, v in zip(rewards, values):
-            g = utils.make_returns(r, hps.gamma, end_value=v[-1])
-            returns.append(g)
-        
-        rewards = np.array(rewards)
-        values = np.array(values)[:, :-1]  # clip the last value estimate.
-        returns = np.array(returns)
+            # Now these are arrays shaped (num_agents, steps, ...)
+            observations = np.array(roll.batched('observations'))
+            actions = np.array(roll.batched('actions'))
+            log_pas = np.array(roll.batched('log_pas'))
+            dones = np.array(roll.batched('dones'))
 
-        dones = utils.combine_dims(dones)
-        observations = utils.combine_dims(observations)[~dones]
-        actions = utils.combine_dims(actions)[~dones]
-        values = utils.combine_dims(values)[~dones]
-        returns = utils.combine_dims(returns)[~dones]
-        log_pas = utils.combine_dims(log_pas)[~dones]
+            # Make the returns estimate.
+            # todo: using Monte-Carlo here. Use n-step return or GAE if this doesn't work.
+            rewards = roll.batched('rewards')
+            values = roll.batched('values')
+            returns = []
+            for r, v in zip(rewards, values):
+                g = utils.make_returns(r, hps.gamma, end_value=v[-1])
+                returns.append(g)
 
-        advantages = returns - values
+            rewards = np.array(rewards)
+            values = np.array(values)[:, :-1]  # clip the last value estimate.
+            returns = np.array(returns)
 
-        g = list(rewards.sum(axis=1))
-        print(f'total rewards: {g}, mean: {onp.mean(g)}')
+            dones = utils.combine_dims(dones)
+            observations = utils.combine_dims(observations)[~dones]
+            actions = utils.combine_dims(actions)[~dones]
+            values = utils.combine_dims(values)[~dones]
+            returns = utils.combine_dims(returns)[~dones]
+            log_pas = utils.combine_dims(log_pas)[~dones]
+            advantages = returns - values
 
-        tf.summary.histogram(f'returns',  g, step=step)
-        tf.summary.scalar(f'returns/average', onp.mean(g), step=step)
-        tf.summary.scalar(f'returns/max', max(g), step=step)
+
+            multi_obs.append(observations)
+            multi_actions.append(actions)
+            multi_values.append(values)
+            multi_returns.append(returns)
+            multi_log_pas.append(log_pas)
+            multi_advantages.append(advantages)
+
+
+            g = list(rewards.sum(axis=1))
+            print(f'total rewards: {g}, mean: {onp.mean(g)}')
+
+            tf.summary.histogram(f'returns',  g, step=step)
+            tf.summary.scalar(f'returns/average', onp.mean(g), step=step)
+            tf.summary.scalar(f'returns/max', max(g), step=step)
+
+        # combine from multiple environments.
+        observations = np.vstack(multi_obs)
+        actions = np.vstack(multi_actions)
+        returns = np.vstack(multi_returns)
+        log_pas = np.vstack(multi_log_pas)
+        advantages = np.vstack(multi_advantages)
 
         get_loss = jax.jit(functools.partial(utils.loss, apply_fn))
         get_loss_components = jax.jit(functools.partial(utils.loss_components, apply_fn))
@@ -227,21 +253,24 @@ def main():
     config = configuration.load(args.config)
 
     # Train Environment.
-    train_env = gym.make(
-        configuration.gym_env_name(config.environment),
-        **configuration.gym_env_config(config.environment))
+    train_envs = [
+        gym.make(
+            configuration.gym_env_name(environment),
+            **configuration.gym_env_config(environment))
+        for environment in config.environments
+    ]
 
     # Test Environment
-    test_environment_config = (
-      config.test_environment if config.HasField('test_environment')
-      else config.environment
-    )
-    test_env = gym.make(
-        configuration.gym_env_name(test_environment_config),
-        **configuration.gym_env_config(test_environment_config))
+    if config.HasField('test_environment'):
+        test_env = gym.make(
+            configuration.gym_env_name(config.test_environment),
+            **configuration.gym_env_config(config.test_environment))
+    else:
+        test_env = None
 
     with tb_writer.as_default():
-        train(train_env, config, test_env=test_env, training_dir=training_dir)
+        train(train_envs, config, test_env=test_env, training_dir=training_dir)
+
     logging.debug("Exiting.")
 
 

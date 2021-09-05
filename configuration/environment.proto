@@ -12,6 +12,9 @@ message Agario {
     }
     optional Difficulty difficulty = 1;
 
+    // The number of player agents.
+    optional int64 num_agents = 2 [default = 1];
+
     // The size, in game-world distance, of the arena.
     optional int64 arena_size = 7;
     optional int64 num_pellets = 3;
@@ -56,10 +59,6 @@ message Observation {
 
 message Environment {
     optional Agario agario = 1;
-
-    // The number of agents acting in the environment.
-    optional int64 num_agents = 2 [default = 1];
-
     optional Observation observation = 3;
     optional Action action = 5;
 }

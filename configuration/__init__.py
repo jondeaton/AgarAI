@@ -51,7 +51,7 @@ def gym_env_config(environment: Environment) -> Dict[str, Any]:
     difficulty = environment_pb2.Agario.Difficulty.DESCRIPTOR.values_by_number[environment.agario.difficulty].name
 
     env_config = {
-            'num_agents':      environment.num_agents,
+            'num_agents':      environment.agario.num_agents,
             'difficulty':      difficulty.lower(),
             'ticks_per_step':  environment.observation.ticks_per_step,
             'arena_size':      environment.agario.arena_size,

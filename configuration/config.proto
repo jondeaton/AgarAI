@@ -30,7 +30,7 @@ message Model {
 }
 
 message Config {
-    optional Environment environment = 1;
+    repeated Environment environments = 1;
     optional Environment test_environment = 2;
 
     optional HyperParameters hyperparameters = 3;
