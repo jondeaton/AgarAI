@@ -111,10 +111,10 @@ def get_efficiency(rewards: np.ndarray,
 def n_step_return(rewards: onp.ndarray,
                   value_estiamtes: onp.ndarray,
                   gamma: float,
-                  n: int,
-                  finished: bool) -> onp.ndarray:
+                  n: int) -> onp.ndarray:
     returns = onp.zeros_like(rewards)
     for t in range(len(rewards)):
+
         Rt = value_estiamtes[t + n]
         for l in reversed(range(n - 1)):
             Rt = gamma * Rt + rewards[t + l]
@@ -124,15 +124,14 @@ def n_step_return(rewards: onp.ndarray,
     return returns
 
 
-def make_returns(rewards: onp.ndarray, gamma: float) -> onp.ndarray:
+def make_returns(rewards: onp.ndarray, gamma: float, end_value: float = 0.0) -> onp.ndarray:
     """ Calculates the discounted future returns for a single rollout
     :param rewards: numpy array containing rewards
     :param gamma: discount factor 0 < gamma < 1
     :return: numpy array containing discounted future returns
     """
-    # todo: make this jittable in jax
     returns = onp.zeros_like(rewards)
-    ret = 0.0
+    ret = end_value
     for i in reversed(range(len(rewards))):
         ret = rewards[i] + gamma * ret
         returns[i] = ret
