@@ -124,6 +124,43 @@ def n_step_return(rewards: onp.ndarray,
     return returns
 
 
+def gae(returns: onp.ndarray,
+        values: onp.ndarray,
+        gamma: float, lam: float) -> onp.ndarray:
+    """Generalized Advantage Estimation.
+
+    Zero makes the advantage equal to Temporal Difference residuals
+    (low variance)
+
+        r[t] + gamma * V[t] - V[t - 1])
+
+    and lam: 1.0 makes it equivalent to Monte-Carlo advantage estimation
+    for the full rollout
+
+    Args:
+        returns: Shape (T, )
+        values: Shape (T + 1, ) state value estimates. This has
+          shape one larger than returns so that the last step
+          that is part of the estimate can have a next-step-value
+          estimate. If the agent "finished" the episode then this
+          final value should be zero, otherwise it should be the actual
+          value-estimate for the final state reached which is technically
+          not part of the episode.
+        gamma: Future time-discount. Between (inclusive) 0 and 1.
+        lam: Hyper-parameter between 0 and 1 inclusive  which scales the
+          variance of the advantage estimation.
+    Returns:
+        Advantage estimates of the same shape as returns: (T, ).
+    """
+    delta = returns + gamma * values[1:] - values[:-1]  # TD residual.
+    adv = onp.zeros_like(returns)
+
+    adv[-1] = delta[-1]
+    for t in reversed(range(len(returns) - 1)):
+        adv[t] = delta[t] + (gamma * lam) * adv[t + 1]
+    return adv
+
+
 def make_returns(rewards: onp.ndarray, gamma: float, end_value: float = 0.0) -> onp.ndarray:
     """ Calculates the discounted future returns for a single rollout
     :param rewards: numpy array containing rewards

@@ -18,7 +18,7 @@ to start tensorboard during training
 
 - LSTM policy
   - ConvLSTM
-- Generalized Advantage Estimation
+- ~Generalized Advantage Estimation~
 - Proximal Policy Optimization
 - Population-based optimization
 

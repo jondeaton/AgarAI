@@ -13,6 +13,7 @@ message HyperParameters {
     optional int64 episode_length = 9;
 
     optional float gamma = 4;
+    optional float gae_lam = 10;
 
     optional bool batch = 5;
     optional int64 batch_size = 6;

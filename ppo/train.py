@@ -40,12 +40,12 @@ def make_actor_critic(model_config: config_pb2.Model,
     num_features = model_config.feature_extractor.num_features
 
     def make_feature_extractor(output_size: int, mode: str) -> Tuple[Callable, Callable]:
-        SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
+        # SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
         return stax.serial(
-            stax.Conv(16, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
-            stax.Conv(16, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
-            stax.Conv(5, filter_shape=(3, 3), padding='SAME'), stax.BatchNorm(), SiLu, stax.Dropout(0.01, mode=mode),
-            stax.Conv(5, filter_shape=(3, 3), padding='SAME'), SiLu, stax.Dropout(0.01, mode=mode),
+            stax.Conv(16, filter_shape=(5, 5)), stax.BatchNorm(), stax.Relu,
+            stax.Conv(16, filter_shape=(5, 5)), stax.BatchNorm(), stax.Relu,
+            stax.Conv(5, filter_shape=(3, 3)), stax.BatchNorm(), stax.Relu, stax.Dropout(0.1, mode=mode),
+            stax.Conv(5, filter_shape=(3, 3)), stax.Relu, stax.Dropout(0.1, mode=mode),
             stax.Flatten,
             stax.Dense(output_size))
 
@@ -110,14 +110,11 @@ def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
         _, value_estimates = apply_fn(params, np.array(observations), rng=key)
         value_estimates = onp.array(value_estimates)
         value_estimates[dones] = 0.0
-        for agent in range(config.environment.num_agents):
-            roll.record({
-                "values": value_estimates
-            })
+        roll.record({
+            "values": value_estimates
+        })
 
     return roll
-
-
 
 
 def train(env: gym.Env, config: configuration.Config,
@@ -154,19 +151,23 @@ def train(env: gym.Env, config: configuration.Config,
         log_pas = np.array(roll.batched('log_pas'))
         dones = np.array(roll.batched('dones'))
 
-        # Make the returns estimate.
-        # todo: using Monte-Carlo here. Use n-step return or GAE if this doesn't work.
+        # Make the returns / advantage estimate.
         rewards = roll.batched('rewards')
         values = roll.batched('values')
+        advantages = []
         returns = []
         for r, v, a in zip(rewards, values, actions):
-            # penalty for doing nothing...
-            g = utils.make_returns(r - (a != 0) * 0.001, hps.gamma, end_value=v[-1])
+            r_ = r - (a != 0) * 0.01  # penalty for moving --> be efficient.
+            g = utils.make_returns(r, hps.gamma, end_value=v[-1])
             returns.append(g)
-        
+
+            adv = utils.gae(r, v, gamma=hps.gamma, lam=hps.gae_lam)
+            advantages.append(adv)
+
         rewards = np.array(rewards)
         values = np.array(values)[:, :-1]  # clip the last value estimate.
         returns = np.array(returns)
+        advantages = np.array(advantages)
 
         dones = utils.combine_dims(dones)
         observations = utils.combine_dims(observations)[~dones]
@@ -174,8 +175,7 @@ def train(env: gym.Env, config: configuration.Config,
         values = utils.combine_dims(values)[~dones]
         returns = utils.combine_dims(returns)[~dones]
         log_pas = utils.combine_dims(log_pas)[~dones]
-
-        advantages = returns - values
+        advantages = utils.combine_dims(advantages)[~dones]
 
         g = list(rewards.sum(axis=1))
         print(f'total rewards: {g}, mean: {onp.mean(g)}')
@@ -186,6 +186,7 @@ def train(env: gym.Env, config: configuration.Config,
         tf.summary.histogram('maxsize', max_sizes, step=step)
         tf.summary.scalar('returns/avg_max_size', max_sizes.mean(), step=step)
         tf.summary.scalar('returns/median_max_size', np.median(max_sizes), step=step)
+        tf.summary.scalar('returns/min_max_size', np.min(max_sizes), step=step)
         tf.summary.scalar('returns/average', onp.mean(g), step=step)
         tf.summary.scalar('returns/max', max(g), step=step)
 
@@ -195,8 +196,7 @@ def train(env: gym.Env, config: configuration.Config,
         dparams_fn = jax.jit(jax.grad(get_loss))
 
         num_samples = observations.shape[0]
-        batch_size = 128
-        for _ in tqdm(range(hps.num_sgd_steps)):
+        for i in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
             params = get_params(adam_state)
 
@@ -204,18 +204,15 @@ def train(env: gym.Env, config: configuration.Config,
             tf.summary.scalar('loss/actor', al, step=step)
             tf.summary.scalar('loss/critic', cl, step=step)
 
-            i = jax.random.choice(key, np.arange(num_samples), shape=(batch_size, ), replace=False)
+            batch_indices = jax.random.choice(
+                key, np.arange(num_samples), shape=(hps.batch_size, ), replace=False)
             dparams = dparams_fn(params,
-                                 observations[i], actions[i], advantages[i],
-                                 returns[i], log_pas[i],
+                                 observations[batch_indices], actions[batch_indices], advantages[batch_indices],
+                                 returns[batch_indices], log_pas[batch_indices],
                                  rng=key)
 
-            # for i, gradient in enumerate(jax.tree_leaves(dparams)):
-            #     tf.summary.histogram(f'gradients/{i}', gradient, step=step)
-
             tf.summary.scalar('gradnorm', optimizers.l2_norm(dparams), step=step)
-
-            # dparams = optimizers.clip_grads(dparams, 10)
+            dparams = optimizers.clip_grads(dparams, 1)
 
             adam_state = adam_update(step, dparams, adam_state)
             step += 1

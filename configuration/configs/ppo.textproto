@@ -28,9 +28,14 @@ hyperparameters {
   num_episodes: 10000
   episode_length: 2048
 
-  num_sgd_steps: 40
-#  batch_size: 256
+  num_sgd_steps: 16
+  batch_size: 128
+  learning_rate: 0.01
 
-  learning_rate: 0.05
-  gamma: 0.7
+  gamma: 0.95
+
+  # Generalized Advantage Estimation.
+  # 0 -> TD (low variance)
+  # 1 -> Monte-Carlo (high variance)
+  gae_lam: 0.1
 }
