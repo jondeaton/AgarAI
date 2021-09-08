@@ -34,13 +34,13 @@ class HyperParameters:
 
         self.save_frequency = 8
 
-
     def override(self, params):
-        """
-        Overrides attributes of this object with those of "params".
+        """Overrides attributes of this object with those of "params".
+
         All attributes of "params" which are also attributes of this object will be set
         to the values found in "params". This is particularly useful for over-riding
         hyper-parameters from command-line arguments
+
         :param params: Object with attributes to override in this object
         :return: None
         """
@@ -50,13 +50,13 @@ class HyperParameters:
                 setattr(self, attr, value)
 
     def save(self, file):
-        """ save the hyper-parameters to file in JSON format """
+        """Save the hyper-parameters to file in JSON format."""
         with open(file, 'w') as f:
             json.dump(self.__dict__, f, indent=4)
 
     @staticmethod
     def restore(file):
-        """ restore hyper-parameters from JSON file """
+        """Restore hyper-parameters from JSON file."""
         with open(file, 'r') as f:
             data = json.load(f)
         hp = HyperParameters()

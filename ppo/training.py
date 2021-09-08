@@ -31,7 +31,7 @@ os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_paralleli
 
 CLIP_EPSILON = 0.01
 
-dtype=jnp.float32
+dtype = jnp.float32
 
 
 @jax.jit
@@ -226,7 +226,9 @@ class Trainer:
 
 
 def get_efficiency(rewards, episode_length, hyperams):
-    """ calculates the "agario mass efficiency", which is a quantity that i invented lol
+    """Agario mass efficiency.
+
+    Calculates the "agario mass efficiency", which is a quantity that i invented lol
     It is supposed to capture the rate at which mass was accumulated relative to
     the density of pellets in the arena. In this way, performance can be
     compared across episodes of different lengths, arenas of different sizes
