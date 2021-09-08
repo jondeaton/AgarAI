@@ -2,8 +2,13 @@
 # proto-message: Config
 
 environment {
+  num_agents: 4
   agario {
-    difficulty: TRIVIAL
+    difficulty: EMPTY
+    num_pellets: 1000
+    arena_size: 1000
+    num_viruses: 0
+    num_bots: 0
   }
   observation { type: GRID }
   action {
@@ -15,4 +20,13 @@ model {
   feature_extractor {
     num_features: 128
   }
+}
+hyperparameters {
+  num_episodes: 100
+  episode_length: 300
+
+  num_sgd_steps: 4
+
+  learning_rate: 0.01
+  gamma: 0.99
 }
