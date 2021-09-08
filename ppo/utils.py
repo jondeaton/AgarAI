@@ -75,7 +75,7 @@ def actor_loss(
     a = jax.lax.stop_gradient(advantages)
     p = a[0] * action_one_hot
     l = xs(p, action_logits)
-    return np.mean(l, axis=0) # average over batch.
+    return np.mean(l, axis=0)  # average over batch.
 
 
 @jax.jit

@@ -52,6 +52,7 @@ def gym_env_config(environment: Environment) -> Dict[str, Any]:
 
     env_config = {
             'num_agents':      environment.num_agents,
+            'multi_agent':     True, # todo: put this into the proto
             'difficulty':      difficulty.lower(),
             'ticks_per_step':  environment.observation.ticks_per_step,
             'arena_size':      environment.agario.arena_size,

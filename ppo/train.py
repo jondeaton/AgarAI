@@ -42,10 +42,10 @@ def make_actor_critic(model_config: config_pb2.Model,
     def make_feature_extractor(output_size: int, mode: str) -> Tuple[Callable, Callable]:
         SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
         return stax.serial(
-            stax.Conv(8, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
-            stax.Conv(8, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
-            stax.Conv(4, filter_shape=(3, 3), padding='SAME'), stax.BatchNorm(), SiLu, stax.Dropout(0.3, mode=mode),
-            stax.Conv(4, filter_shape=(3, 3), padding='SAME'), SiLu, stax.Dropout(0.3, mode=mode),
+            stax.Conv(16, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
+            stax.Conv(16, filter_shape=(5, 5), padding='SAME'), stax.BatchNorm(), SiLu,
+            stax.Conv(5, filter_shape=(3, 3), padding='SAME'), stax.BatchNorm(), SiLu, stax.Dropout(0.01, mode=mode),
+            stax.Conv(5, filter_shape=(3, 3), padding='SAME'), SiLu, stax.Dropout(0.01, mode=mode),
             stax.Flatten,
             stax.Dense(output_size))
 
@@ -66,7 +66,7 @@ def make_actor_critic(model_config: config_pb2.Model,
         fe_params, actor_params, critic_params = params
         features = fe_fn(fe_params, observations, rng=rng)
         actor_output = actor_fn(actor_params, features, rng=rng)
-        critic_output = np.squeeze(critic_fn(critic_params, features, rng=rng))
+        critic_output = critic_fn(critic_params, features, rng=rng)[:, 0]
         return actor_output, critic_output
 
     return init_fn, apply_fn
@@ -159,8 +159,9 @@ def train(env: gym.Env, config: configuration.Config,
         rewards = roll.batched('rewards')
         values = roll.batched('values')
         returns = []
-        for r, v in zip(rewards, values):
-            g = utils.make_returns(r, hps.gamma, end_value=v[-1])
+        for r, v, a in zip(rewards, values, actions):
+            # penalty for doing nothing...
+            g = utils.make_returns(r - (a != 0) * 0.001, hps.gamma, end_value=v[-1])
             returns.append(g)
         
         rewards = np.array(rewards)
@@ -178,32 +179,44 @@ def train(env: gym.Env, config: configuration.Config,
 
         g = list(rewards.sum(axis=1))
         print(f'total rewards: {g}, mean: {onp.mean(g)}')
+        max_sizes = np.cumsum(rewards, axis=1).max(axis=1)
+        print(f'max sizes: {max_sizes}')
 
-        tf.summary.histogram(f'returns',  g, step=step)
-        tf.summary.scalar(f'returns/average', onp.mean(g), step=step)
-        tf.summary.scalar(f'returns/max', max(g), step=step)
+        tf.summary.histogram('returns',  g, step=step)
+        tf.summary.histogram('maxsize', max_sizes, step=step)
+        tf.summary.scalar('returns/avg_max_size', max_sizes.mean(), step=step)
+        tf.summary.scalar('returns/median_max_size', np.median(max_sizes), step=step)
+        tf.summary.scalar('returns/average', onp.mean(g), step=step)
+        tf.summary.scalar('returns/max', max(g), step=step)
 
         get_loss = jax.jit(functools.partial(utils.loss, apply_fn))
         get_loss_components = jax.jit(functools.partial(utils.loss_components, apply_fn))
 
-        @jax.jit
-        def dparams_fn(*args, **kwargs):
-            dparams = jax.grad(get_loss)(*args, **kwargs)
-            return jax.tree_map(functools.partial(np.clip, a_min=-0.1, a_max=0.1), dparams)
+        dparams_fn = jax.jit(jax.grad(get_loss))
 
         num_samples = observations.shape[0]
-        batch_size = 256
+        batch_size = 128
         for _ in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
             params = get_params(adam_state)
 
             al, cl = get_loss_components(params, observations, actions, advantages, returns, log_pas, rng=key)
-            tf.summary.scalar(f'loss/actor', al, step=step)
-            tf.summary.scalar(f'loss/critic', cl, step=step)
+            tf.summary.scalar('loss/actor', al, step=step)
+            tf.summary.scalar('loss/critic', cl, step=step)
 
             i = jax.random.choice(key, np.arange(num_samples), shape=(batch_size, ), replace=False)
-            dparams = dparams_fn(params, observations[i], actions[i], advantages[i],
-                                 returns[i], log_pas[i], rng=key)
+            dparams = dparams_fn(params,
+                                 observations[i], actions[i], advantages[i],
+                                 returns[i], log_pas[i],
+                                 rng=key)
+
+            # for i, gradient in enumerate(jax.tree_leaves(dparams)):
+            #     tf.summary.histogram(f'gradients/{i}', gradient, step=step)
+
+            tf.summary.scalar('gradnorm', optimizers.l2_norm(dparams), step=step)
+
+            # dparams = optimizers.clip_grads(dparams, 10)
+
             adam_state = adam_update(step, dparams, adam_state)
             step += 1
 
@@ -212,7 +225,7 @@ def main():
     args = parse_args()
 
     if args.debug:
-        logging.warning(f"Debug mode on. Model will not be saved")
+        logging.warning("Debug mode on. Model will not be saved.")
         training_dir = None
         tb_writer = tf.summary.create_noop_writer()
     else:
