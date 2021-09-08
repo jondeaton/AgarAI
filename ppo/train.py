@@ -9,6 +9,7 @@ from configuration import config_pb2, environment_pb2
 
 import rollout
 from ppo import utils
+from ppo import action_conversion
 
 import jax
 from jax import numpy as np
@@ -23,82 +24,6 @@ from tqdm import tqdm
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # If its not an error then fuck off.
 import tensorflow as tf
 tf.config.experimental.set_visible_devices([], "GPU")  # no GPU for U, bitch.
-
-# Limit operations to single thread when on CPU.
-# todo: Do I need this???
-# os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1"
-
-def action_size(action_config: environment_pb2.Action) -> int:
-    num_acts = int(action_config.allow_splitting) + int(action_config.allow_feeding)
-    move_size = action_config.num_directions * action_config.num_magnitudes
-    return 1 + move_size + action_config.num_directions * num_acts
-
-
-AgarioAction = Tuple[np.ndarray, int]
-
-
-def make_action_converter(action_config: environment_pb2.Action):
-    """Creates function to turn what comes out of the model into an
-    action that can go into the environment.
-
-    Actions have the following form
-
-    index 0: do nothing
-    next (num_directions * num_magnitudes) indexes: just move
-    next (num_directions * num_actions): act in specified direction
-    """
-    num_moves = action_config.num_directions * action_config.num_magnitudes
-
-    @jax.jit
-    def direction(magnitude: float, theta: float) -> np.ndarray:
-        x = np.cos(theta) * magnitude
-        y = np.sin(theta) * magnitude
-        return np.array([x, y])
-
-    @jax.jit
-    def move(index: int) -> AgarioAction:
-        theta_index = index % action_config.num_directions
-        mag_index = index // action_config.num_directions
-
-        theta = 2 * np.pi * theta_index / action_config.num_directions
-        mag = 1 - mag_index / (1 + action_config.num_magnitudes)
-        return direction(mag, theta), 0
-
-    @jax.jit
-    def act(index: int) -> AgarioAction:
-        theta_index = index % action_config.num_directions
-        theta = 2 * np.pi * theta_index / action_config.num_directions
-
-        if action_config.allow_splitting and action_config.allow_feeding:
-            act = 1 + index / action_config.num_directions
-        elif action_config.allow_splitting:
-            act = 1
-        elif action_config.allow_feeding:
-            act = 2
-        else:
-            act = 0
-
-        return direction(1.0, theta), act
-
-    @jax.jit
-    def do_something(index: int) -> AgarioAction:
-        return jax.lax.cond(
-            index < num_moves,
-            lambda i: move(i),
-            lambda i: act(i - num_moves),
-            operand=index
-        )
-
-    @jax.jit
-    def action_converter(index: int) -> AgarioAction:
-        do_nothing = np.array([0, 0], dtype=np.float32), 0
-        return jax.lax.cond(
-            index == 0,
-            lambda _: do_nothing,
-            lambda i: do_something(i - 1),
-            operand=index)
-
-    return action_converter
 
 
 def make_actor_critic(model_config: config_pb2.Model,
@@ -154,8 +79,8 @@ def train(env: gym.Env, config: configuration.Config,
     hps = config.hyperparameters
 
     input_shape = (1,) + env.observation_space.shape
-    num_actions = action_size(config.environment.action)
-    action_converter = make_action_converter(config.environment.action)
+    num_actions = action_conversion.action_size(config.environment.action)
+    action_converter = action_conversion.make_action_converter(config.environment.action)
 
     init_fn, apply_fn = make_actor_critic(config.model, num_actions, 'train')
 
@@ -166,8 +91,8 @@ def train(env: gym.Env, config: configuration.Config,
     adam_state = adam_init(params)
 
     step = 0
-    for ep in range(hps.num_episodes):
-        logging.info(f"Episode {ep}")
+    for episode in range(hps.num_episodes):
+        logging.info(f"Episode {episode}")
 
         params = get_params(adam_state)
 
@@ -207,6 +132,10 @@ def train(env: gym.Env, config: configuration.Config,
         g = np.array(rewards).sum(axis=1)
         print(f'total rewards: {g}')
 
+        tf.summary.histogram(f'returns',  g, step=step)
+        tf.summary.scalar(f'returns/average', g.mean(), step=step)
+        tf.summary.scalar(f'returns/max', g.max(), step=step)
+
         returns = np.array(utils.make_returns_batch(rewards, hps.gamma))
         advantages = returns - values
 
@@ -217,14 +146,22 @@ def train(env: gym.Env, config: configuration.Config,
         returns = utils.combine_dims(returns)[np.logical_not(dones)]
         log_pas = utils.combine_dims(log_pas)[np.logical_not(dones)]
 
-        dparams_fn = jax.jit(
-            jax.grad(
-                functools.partial(utils.loss, apply_fn)
-            )
-        )
+        get_loss = jax.jit(functools.partial(utils.loss, apply_fn))
+        get_loss_components = jax.jit(functools.partial(utils.loss_components, apply_fn))
+
+        @jax.jit
+        def dparams_fn(*args, **kwargs):
+            dparams = jax.grad(get_loss)(*args, **kwargs)
+            return jax.tree_map(functools.partial(np.clip, a_min=-0.1, a_max=0.1), dparams)
+
         for _ in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
             params = get_params(adam_state)
+
+            al, cl = get_loss_components(params, observations, actions, advantages, returns, log_pas, rng=key)
+            tf.summary.scalar(f'loss/actor', al, step=step)
+            tf.summary.scalar(f'loss/critic', cl, step=step)
+
             dparams = dparams_fn(params, observations, actions, advantages, returns, log_pas, rng=key)
             adam_state = adam_update(step, dparams, adam_state)
             step += 1
@@ -236,12 +173,14 @@ def main():
     if args.debug:
         logging.warning(f"Debug mode on. Model will not be saved")
         training_dir = None
+        tb_writer = tf.summary.create_noop_writer()
     else:
         output_dir = args.output
         os.makedirs(args.output, exist_ok=True)
 
         training_dir = get_training_dir(output_dir, args.name)
         os.makedirs(training_dir, exist_ok=True)
+        tb_writer = tf.summary.create_file_writer(training_dir)
         logging.info(f"Model directory: {training_dir}")
 
     config = configuration.load(args.config)
@@ -260,7 +199,8 @@ def main():
         configuration.gym_env_name(test_environment_config),
         **configuration.gym_env_config(test_environment_config))
 
-    train(train_env, config, test_env=test_env, training_dir=training_dir)
+    with tb_writer.as_default():
+        train(train_env, config, test_env=test_env, training_dir=training_dir)
     logging.debug("Exiting.")
 
 
