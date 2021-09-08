@@ -19,11 +19,10 @@ def transpose_batch(collection: List[np.ndarray]) -> List[np.ndarray]:
     :param collection: List[np.ndarray]
     :return: List[np.ndarray]
     """
-    transposed = zip(*collection)
-    return [np.array(list(none_filter(rollout))) for rollout in transposed]
+    return [np.array(list(rollout)) for rollout in zip(*collection)]
 
 
-class Rollout:
+class MultiRollout:
     """ This class represents a batch of "roll-outs". Each roll-out is
     a complete history of an agent's interactions with it's environment.
     """
