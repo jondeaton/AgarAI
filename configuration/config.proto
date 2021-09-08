@@ -29,7 +29,7 @@ message Model {
             CNN = 3;
         }
         optional Type type = 1;
-        optional int64 feature_size = 2;
+        optional int64 num_features = 2;
     }
     optional FeatureExtractor feature_extractor = 1;
 }

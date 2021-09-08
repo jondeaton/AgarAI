@@ -6,4 +6,13 @@ environment {
     difficulty: TRIVIAL
   }
   observation { type: GRID }
+  action {
+    num_directions: 8
+    num_magnitudes: 2
+  }
+}
+model {
+  feature_extractor {
+    num_features: 128
+  }
 }
