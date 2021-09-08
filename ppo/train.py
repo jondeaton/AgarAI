@@ -40,12 +40,12 @@ def make_actor_critic(model_config: config_pb2.Model,
     num_features = model_config.feature_extractor.num_features
 
     def make_feature_extractor(output_size: int, mode: str) -> Tuple[Callable, Callable]:
-        # SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
+        SiLu = stax.elementwise(lambda x: x * jax.nn.sigmoid(x))
         return stax.serial(
-            stax.Conv(16, filter_shape=(5, 5)), stax.BatchNorm(), stax.Relu,
-            stax.Conv(16, filter_shape=(5, 5)), stax.BatchNorm(), stax.Relu,
-            stax.Conv(5, filter_shape=(3, 3)), stax.BatchNorm(), stax.Relu, stax.Dropout(0.1, mode=mode),
-            stax.Conv(5, filter_shape=(3, 3)), stax.Relu, stax.Dropout(0.1, mode=mode),
+            stax.Conv(16, filter_shape=(5, 5)), SiLu,
+            stax.Conv(16, filter_shape=(5, 5)), SiLu,
+            stax.Conv(5, filter_shape=(3, 3)), SiLu, stax.Dropout(0.95, mode=mode),
+            stax.Conv(5, filter_shape=(3, 3)), SiLu, stax.Dropout(0.95, mode=mode),
             stax.Flatten,
             stax.Dense(output_size))
 
@@ -132,7 +132,9 @@ def train(env: gym.Env, config: configuration.Config,
     key = jax.random.PRNGKey(hps.seed)
     _, params = init_fn(key, input_shape)
 
-    adam_init, adam_update, get_params = optimizers.adam(hps.learning_rate)
+    learning_rate = lambda step: 0.001 * np.exp(- step / 500) + 0.00001
+
+    adam_init, adam_update, get_params = optimizers.adam(learning_rate)
     adam_state = adam_init(params)
 
     step = 0
@@ -157,7 +159,6 @@ def train(env: gym.Env, config: configuration.Config,
         advantages = []
         returns = []
         for r, v, a in zip(rewards, values, actions):
-            r_ = r - (a != 0) * 0.01  # penalty for moving --> be efficient.
             g = utils.make_returns(r, hps.gamma, end_value=v[-1])
             returns.append(g)
 
@@ -177,6 +178,8 @@ def train(env: gym.Env, config: configuration.Config,
         log_pas = utils.combine_dims(log_pas)[~dones]
         advantages = utils.combine_dims(advantages)[~dones]
 
+        tf.summary.histogram('value_estimates', values, step=step)
+
         g = list(rewards.sum(axis=1))
         print(f'total rewards: {g}, mean: {onp.mean(g)}')
         max_sizes = np.cumsum(rewards, axis=1).max(axis=1)
@@ -189,6 +192,7 @@ def train(env: gym.Env, config: configuration.Config,
         tf.summary.scalar('returns/min_max_size', np.min(max_sizes), step=step)
         tf.summary.scalar('returns/average', onp.mean(g), step=step)
         tf.summary.scalar('returns/max', max(g), step=step)
+        tf.summary.scalar('learning_rate', learning_rate(step), step=step)
 
         get_loss = jax.jit(functools.partial(utils.loss, apply_fn))
         get_loss_components = jax.jit(functools.partial(utils.loss_components, apply_fn))
@@ -196,13 +200,15 @@ def train(env: gym.Env, config: configuration.Config,
         dparams_fn = jax.jit(jax.grad(get_loss))
 
         num_samples = observations.shape[0]
-        for i in tqdm(range(hps.num_sgd_steps)):
+        for _ in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
             params = get_params(adam_state)
 
-            al, cl = get_loss_components(params, observations, actions, advantages, returns, log_pas, rng=key)
+            al, cl, entropy = get_loss_components(params, observations, actions, advantages, returns, log_pas, rng=key)
             tf.summary.scalar('loss/actor', al, step=step)
             tf.summary.scalar('loss/critic', cl, step=step)
+            tf.summary.scalar('loss/entropy', np.mean(entropy), step=step)
+            tf.summary.histogram('entropy', entropy, step=step)
 
             batch_indices = jax.random.choice(
                 key, np.arange(num_samples), shape=(hps.batch_size, ), replace=False)

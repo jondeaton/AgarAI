@@ -28,7 +28,14 @@ def ppo_actor_loss(
 
 @jax.jit
 def critic_loss(values, returns):
-    return np.square(values - returns).mean()
+    return huber(values - returns).mean()
+
+
+def huber(a, delta: float = 1.0):
+    return np.where(
+        np.abs(a) < delta, np.square(a) / 2, delta * (np.abs(a) - delta / 2)
+    )
+
 
 
 @jax.jit
@@ -39,10 +46,10 @@ def combine_dims(x):
 def loss(apply_fn,
          params, observations, actions, advantages, returns, log_pa,
          rng: Optional[jax.random.PRNGKey] = None):
-    loss_actor, loss_critic = loss_components(
+    loss_actor, loss_critic, entropy = loss_components(
         apply_fn,
         params, observations, actions, advantages, returns, log_pa, rng=rng)
-    return loss_actor + loss_critic
+    return loss_actor + loss_critic - (entropy.mean() / 100)
 
 
 def loss_components(apply_fn,
@@ -51,7 +58,10 @@ def loss_components(apply_fn,
     action_logits, values = apply_fn(params, observations, rng=rng)
     loss_actor = actor_loss(action_logits, values, actions, advantages, log_pa)
     loss_critic = critic_loss(values, returns)
-    return loss_actor, loss_critic
+
+    entropy = xs(jax.nn.softmax(action_logits, axis=1), action_logits)
+
+    return loss_actor, loss_critic, entropy
 
 
 def actor_loss(
@@ -71,10 +81,11 @@ def actor_loss(
     Returns:
         Scalar loss for the batch.
     """
-    action_one_hot = jax.nn.one_hot(actions, action_logits.shape[1])
-    a = jax.lax.stop_gradient(advantages)
-    p = a[0] * action_one_hot
-    l = xs(p, action_logits)
+    _, num_actions = action_logits.shape
+    action_one_hot = jax.nn.one_hot(actions, num_actions)
+    adv = jax.lax.stop_gradient(advantages)
+    p = adv[:, np.newaxis] * action_one_hot
+    l = fl(p, action_logits)
     return np.mean(l, axis=0)  # average over batch.
 
 
@@ -84,9 +95,9 @@ def xs(p: np.ndarray, q_logits: np.ndarray) -> np.ndarray:
     return np.where(p == 0, 0, - p * log_q).sum(axis=1)
 
 
-def fl(p, q_logits):
+def fl(p, q_logits, gamma: float = 1.0):
     q = jax.nn.softmax(q_logits, axis=1)
-    mf = np.power(1 - q, 1.0)
+    mf = np.power(1 - q, gamma)
     return xs(mf * p, q_logits)
 
 
@@ -159,6 +170,27 @@ def gae(returns: onp.ndarray,
     for t in reversed(range(len(returns) - 1)):
         adv[t] = delta[t] + (gamma * lam) * adv[t + 1]
     return adv
+
+
+from jax import ops
+@jax.jit
+def _gae(returns, values, gamma, lam):
+
+    T, = returns.shape
+    delta = returns + gamma * values[1:] - values[:-1]
+
+    adv = onp.zeros_like(returns)
+    adv = ops.index_update(adv, T, delta[T])
+
+    # todo: this doesn't actually work but is the right idea.
+    # just go backwards instead...
+    return jax.lax.fori_loop(
+        0, T - 1,
+        lambda t, adv: jax.ops.index_update(
+            adv, t, delta[t] + (gamma * lam) * adv[t + 1]
+        ),
+        adv
+    )
 
 
 def make_returns(rewards: onp.ndarray, gamma: float, end_value: float = 0.0) -> onp.ndarray:
