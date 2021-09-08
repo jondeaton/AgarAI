@@ -4,8 +4,6 @@
 # proto-message: Config
 
 environment {
-  agario {
-    difficulty: EASY
-  }
+  agario { difficulty: TRIVIAL }
 }
 

@@ -12,11 +12,10 @@ import os
 from typing import *
 
 from google.protobuf import text_format
-from . import config_pb2
-from . import environment_pb2
+from configuration import config_pb2, environment_pb2
+
 
 Config = config_pb2.Config
-
 Agario = environment_pb2.Agario
 Environment = environment_pb2.Environment
 Observation = environment_pb2.Observation
@@ -49,10 +48,12 @@ def gym_env_name(environment: Environment) -> str:
 
 def gym_env_config(environment: Environment) -> Dict[str, Any]:
     """Makes the Gym environment configuration dict from a Config."""
+    difficulty = environment_pb2.Agario.Difficulty.DESCRIPTOR.values_by_number[environment.agario.difficulty].name
+
     env_config = {
             'num_agents':      environment.num_agents,
-            'difficulty':      environment.agario.difficulty,
-            'ticks_per_step':  environment.agario.ticks_per_step,
+            'difficulty':      difficulty.lower(),
+            'ticks_per_step':  environment.observation.ticks_per_step,
             'arena_size':      environment.agario.arena_size,
             'num_pellets':     environment.agario.num_pellets,
             'num_viruses':     environment.agario.num_viruses,

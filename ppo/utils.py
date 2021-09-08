@@ -2,6 +2,7 @@
 
 import jax
 from jax import numpy as np
+from typing import *
 
 
 @jax.jit
@@ -18,10 +19,9 @@ def one_hot(labels, num_classes, on_value=1.0, off_value=0.0):
 
 @jax.jit
 def actor_loss(
-        model, observations, actions, advantages, log_pa,
+    action_logits, values, actions, advantages, log_pa,
         clip_eps: float = 0.01):
     """PPO Actor Loss."""
-    action_logits, values = model(observations)
 
     new_log_pas = jax.nn.log_softmax(action_logits) * one_hot(actions, action_logits.shape[1])
     new_log_pa = take_along(new_log_pas, actions)
@@ -33,9 +33,8 @@ def actor_loss(
 
 
 @jax.jit
-def critic_loss(model, observations, returns):
-    _, values_pred = model(observations)
-    return np.square(values_pred - returns).mean()
+def critic_loss(action_logits, values, returns):
+    return np.square(values - returns).mean()
 
 
 @jax.jit
@@ -56,6 +55,15 @@ def train_step(optimizer, observations, actions, advantages, returns, log_pa):
     return optimizer
 
 
+
+@jax.jit
+def loss(apply_fn, params, observations, actions, advantages, returns, log_pa):
+    action_logits, values = apply_fn(observations)
+    loss_actor = actor_loss(action_logits, values, actions, advantages, log_pa)
+    loss_critic = critic_loss(action_logits, values, returns)
+    return loss_actor + loss_critic
+
+
 @jax.jit
 def get_efficiency(rewards: np.ndarray,
                    episode_length: int,
@@ -72,3 +80,28 @@ def get_efficiency(rewards: np.ndarray,
     pellet_density = num_pellets / pow(arena_size, 2)
     efficiency = G / (episode_length * pellet_density)
     return efficiency
+
+
+def make_returns(rewards: np.ndarray, gamma: float) -> np.ndarray:
+    """ Calculates the discounted future returns for a single rollout
+    :param rewards: numpy array containing rewards
+    :param gamma: discount factor 0 < gamma < 1
+    :return: numpy array containing discounted future returns
+    """
+    returns = np.zeros_like(rewards)
+
+    ret = 0.0
+    for i in reversed(range(len(rewards))):
+        returns[i] = ret = rewards[i] + gamma * ret
+
+    return returns
+
+
+def make_returns_batch(reward_batch: List[np.ndarray], gamma: float) -> List[np.ndarray]:
+    """ Calculates discounted episodes returns
+    :param reward_batch: list of numpy arrays. Each numpy array is
+    the episode rewards for a single episode in the batch
+    :param gamma: discount factor 0 < gamma < 1
+    :return: list of numpy arrays representing the returns
+    """
+    return [make_returns(rewards, gamma) for rewards in reward_batch]

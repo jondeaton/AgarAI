@@ -5,13 +5,62 @@ Author: Jon Deaton (jonpauldeaton@gmail.com)
 """
 
 import json
+import gym
+
+def make_test_env(env_name, hyperams):
+    """ creates an environment for testing """
+    return gym.make(env_name, **{
+        'num_agents': 8,
+        'difficulty': 'normal',
+        'ticks_per_step': hyperams.ticks_per_step,
+        'arena_size': 500,
+        'num_pellets': 1000,
+        'num_viruses': 25,
+        'num_bots': 25,
+        'pellet_regen': True,
+
+        "grid_size": hyperams.grid_size,
+        "observe_cells": hyperams.observe_cells,
+        "observe_others": hyperams.observe_others,
+        "observe_viruses": hyperams.observe_viruses,
+        "observe_pellets": hyperams.observe_pellets
+    })
+
+
+def make_environment(env_name, hyperams):
+    """ makes and configures the specified OpenAI gym environment """
+
+    env_config = dict()
+
+    if env_name == "agario-grid-v0":
+        env_config = {
+                'num_agents':      hyperams.agents_per_env,
+                'difficulty':      hyperams.difficulty,
+                'ticks_per_step':  hyperams.ticks_per_step,
+                'arena_size':      hyperams.arena_size,
+                'num_pellets':     hyperams.num_pellets,
+                'num_viruses':     hyperams.num_viruses,
+                'num_bots':        hyperams.num_bots,
+                'pellet_regen':    hyperams.pellet_regen,
+            }
+
+        # observation parameters
+        env_config.update({
+            "grid_size":       hyperams.grid_size,
+            "num_frames":      1,
+            "observe_cells":   hyperams.observe_cells,
+            "observe_others":  hyperams.observe_others,
+            "observe_viruses": hyperams.observe_viruses,
+            "observe_pellets": hyperams.observe_pellets
+        })
+
+    env = gym.make(env_name, **env_config)
+    return env
 
 
 class HyperParameters:
-    """ Simple class for storing model hyper-parameters """
-
     def __init__(self):
-        self.seed = 42
+        self.seed = 0
 
         # to fill in by sub_classes
         self.env_name = None
@@ -72,8 +121,6 @@ class GridEnvHyperparameters(HyperParameters):
 
         self.architecture = 'Basic'
         self.encoder_class = 'CNN'
-
-        self.asynchronous = False
 
         self.learning_rate = 0.01
         self.num_episodes = 4096
