@@ -47,7 +47,7 @@ message Observation {
     // for each environment step.
     optional int64 ticks_per_step = 8 [default = 4];
 
-    optional int64 grid_size = 3 [default = 32];
+    optional int64 grid_size = 3 [default = 64];
     optional bool pellets = 4 [default = true];
     optional bool viruses = 5 [default = true];
     optional bool cells = 6 [default = true];

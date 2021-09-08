@@ -12,7 +12,9 @@ environment {
   }
   observation {
     type: GRID
-    ticks_per_step: 2
+    ticks_per_step: 4
+    grid_size: 64
+    viruses: false
   }
   action {
     num_directions: 8
@@ -26,7 +28,7 @@ model {
 }
 hyperparameters {
   num_episodes: 10000
-  episode_length: 2048
+  episode_length: 512
 
   num_sgd_steps: 16
   batch_size: 128
