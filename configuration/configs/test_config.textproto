@@ -1,0 +1,11 @@
+# Configuration for testing.
+#
+# proto-file: configuration/config.proto
+# proto-message: Config
+
+environment {
+  agario {
+    difficulty: EASY
+  }
+}
+

@@ -89,25 +89,27 @@ def action_size(action_config: configuration.Action) -> int:
     move_size = action_config.num_directions * action_config.num_magnitudes
     return 1 + move_size + action_config.num_directions * num_acts
 
+
 def get_action_converter(action_config: configuration.Action) -> Callable:
 
-    def index_to_action(index: int):
-        if index == 0:
-            return np.array([0, 0]), 0
+    def index_to_action(indexg: int):
+        return np.array([0, 0]), 0
+        # if index == 0:
+        #     return np.array([0, 0]), 0
+        #
+        #  move_size = action_config.num_directions * action_config.num_magnitudes
+        #  if index + 1 < move_size:
+        #      ...  # ugh
+        #
+        # indices = np.unravel_index(index, action_config.num_directions)
+        # theta = (2 * np.pi * indices[0]) / action_shape[0]
+        # mag = 1 - indices[1] / action_shape[1]
+        # act = int(indices[2])
+        # x = np.cos(theta) * mag
+        # y = np.sin(theta) * mag
+        # return np.array([x, y]), act
 
-         move_size = action_config.num_directions * action_config.num_magnitudes
-         if index + 1 < move_size:
-             # ugh
-
-        indices = np.unravel_index(index, action_config.num_directions)
-        theta = (2 * np.pi * indices[0]) / action_shape[0]
-        mag = 1 - indices[1] / action_shape[1]
-        act = int(indices[2])
-        x = np.cos(theta) * mag
-        y = np.sin(theta) * mag
-        return np.array([x, y]), act
-
-    return to_action
+    return index_to_action
 
 
 

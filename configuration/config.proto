@@ -4,99 +4,44 @@ syntax = "proto2";
 
 package configuration;
 
+message HyperParameters {
+    optional int64 seed = 1 [default = 0];
+
+    optional float learning_rate = 2;
+    optional int64 num_episodes = 3;
+
+    optional float gamma = 4;
+
+    optional bool batch = 5;
+    optional int64 batch_size = 6;
+
+    optional int64 num_environments = 7;
+}
+
+message Model {
+    message FeatureExtractor {
+        enum Type {
+            UNKNOWN = 1;
+            DNN = 2;
+            CNN = 3;
+        }
+        optional Type type = 1;
+    }
+    optional FeatureExtractor feature_extractor = 1;
+}
+
 message Config {
+    optional configuration.Environment environment = 1;
+    optional configuration.Environment test_environment = 2;
 
-    message Environment {
-        message Agario {
-            enum Difficulty {
-                EASY = 1;
-                NORMAL = 2;
-                HARD = 3;
-            }
-        optional Difficulty difficulty = 1;
+    optional HyperParameters hyperparameters = 3;
 
-        optional int64 arena_size = 7;
-
-        // The number of game ticks that are advanced
-        // for each environment step.
-        optional int64 ticks_per_step = 2;
-
-        optional int64 num_pellets = 3;
-        optional int64 num_viruses = 4;
-        optional int64 num_bots = 5;
-        optional bool pellet_regen = 6;
-    }
-    optional Agario agario = 2;
-
-    // The number of agents acting in the environment.
-    optional int64 num_agents = 2;
-
-    message Observation {
-            enum Type {
-                UNKNOWN = 0;
-                GRID = 1;
-                RAM = 2;
-                SCREEN = 3;
-            }
-            optional Type type = 0;
-
-            // The number of frames observed on each step.
-            optional int64 num_frames = 1;
-
-            // The number of 
-            optional int64 grid_size = 2;
-            optional bool pellets = 3;
-            optional bool viruses = 4;
-            optional bool cells = 5;
-            optional bool others = 6;
-        }
-        optional Observation observation = 3;
-
-        message Action {
-            optional int64 num_directions = 1;
-            optional int64 num_magnitudes = 2;
-            optional bool allow_splitting = 2;
-            optional bool allow_feeding = 3;
-        }
-        optional Action action = 1;
-    }
-    optional Environment environment = 1;
-
-    optional Environment test_environment = 4;
-
-    message HyperParameters {
-        optional int64 seed = 1 [default = 0];
-        
-        optional float learning_rate = 2;
-        optional int64 num_episodes = 3;
-
-        optional float gamma = 4;
-
-        optional bool batch = 5;
-        optional int64 batch_size = 6;
-
-        optional int64 num_environments = 7;
-    }
-    optional HyperParameters hyperparameters = 1;
-
-
-    message Model {
-        message FeatureExtractor {
-            enum Type {
-                UNKNOWN = 1;
-                DNN = 2;
-                CNN = 3;
-            }
-            optional Type type = 1;
-        }
-        optional FeatureExtractor feature_extractor = 1;
-    }
-    optional Model model = 1;
-
+    optional Model model = 4;
 
     message Training {
         optional int64 save_frequency = 1;
     }
+    optional Training training = 5;
 }
 
 

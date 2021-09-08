@@ -1,0 +1,62 @@
+// Configuration for environment.
+syntax = "proto2";
+
+package configuration;
+
+message Agario {
+    enum Difficulty {
+        EASY = 1;
+        NORMAL = 2;
+        HARD = 3;
+    }
+    optional Difficulty difficulty = 1;
+
+    optional int64 arena_size = 7;
+
+    // The number of game ticks that are advanced
+    // for each environment step.
+    optional int64 ticks_per_step = 2;
+
+    optional int64 num_pellets = 3;
+    optional int64 num_viruses = 4;
+    optional int64 num_bots = 5;
+    optional bool pellet_regen = 6;
+}
+
+
+message Action {
+    optional int64 num_directions = 1;
+    optional int64 num_magnitudes = 2;
+    optional bool allow_splitting = 3;
+    optional bool allow_feeding = 4;
+}
+
+message Observation {
+    enum Type {
+        UNKNOWN = 0;
+        GRID = 1;
+        RAM = 2;
+        SCREEN = 3;
+    }
+    optional Type type = 1;
+
+    // The number of frames observed on each step.
+    optional int64 num_frames = 2;
+
+    // The number of
+    optional int64 grid_size = 3;
+    optional bool pellets = 4;
+    optional bool viruses = 5;
+    optional bool cells = 6;
+    optional bool others = 7;
+}
+
+message Environment {
+    optional Agario agario = 1;
+
+    // The number of agents acting in the environment.
+    optional int64 num_agents = 2;
+
+    optional Observation observation = 3;
+    optional Action action = 5;
+}
