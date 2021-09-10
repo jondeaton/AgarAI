@@ -1,3 +1,2 @@
 
-from .rollout import Rollout
-from .multi_rollout import MultiRollout
+from rollout.multi_rollout import MultiRollout

@@ -10,10 +10,9 @@ from configuration import config_pb2, environment_pb2
 
 from utils import get_training_dir
 
+import rl
 import rollout
-from ppo import utils
 from ppo import action_conversion
-
 
 import jax
 from jax import numpy as np
@@ -76,6 +75,65 @@ def make_actor_critic(model_config: config_pb2.Model,
     return init_fn, apply_fn
 
 
+@jax.jit
+def combine_dims(x):
+    return x.reshape((-1, ) + x.shape[2:])
+
+
+def loss(apply_fn,
+         params, observations, actions, advantages, returns, action_logits,
+         rng: Optional[jax.random.PRNGKey] = None):
+    loss_actor, loss_critic, entropy = loss_components(
+        apply_fn,
+        params, observations, actions, advantages, returns, action_logits,
+        rng=rng)
+    return loss_actor + loss_critic + 1 / (entropy.mean() * 100)
+
+
+def loss_components(
+        apply_fn,
+        params, observations, actions, advantages, returns, old_action_logits,
+        rng: Optional[jax.random.PRNGKey] = None,
+        ppo: bool = False):
+    action_logits, values = apply_fn(params, observations, rng=rng)
+    if ppo:
+        loss_actor = rl.ppo_actor_loss(
+            action_logits, actions, advantages, old_action_logits,
+            clip_eps=0.2)
+    else:
+        loss_actor = rl.actor_loss(action_logits, actions, advantages)
+
+    loss_critic = rl.critic_loss(values, returns)
+
+    entropy = rl.xs(jax.nn.softmax(action_logits, axis=1), action_logits)
+
+    return loss_actor, loss_critic, entropy
+
+
+def multi_optimizer(optimizers):
+
+    def init(params):
+        return tuple(
+            o[0](p) for o, p in
+            zip(optimizers, params)
+        )
+
+    def update(step, upd, state):
+        return tuple(
+            o[1](step, u, s) for o, u, s in
+            zip(optimizers, upd, state)
+        )
+
+    def get_params(state):
+        return tuple(
+            o[2](s) for o, s in
+            zip(optimizers, state)
+        )
+
+    return init, update, get_params
+
+
+
 def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
     apply_fn, params = model
     hps = config.hyperparameters
@@ -136,9 +194,14 @@ def train(env: gym.Env, config: configuration.Config,
     _, params = init_fn(key, input_shape)
 
     learning_rate = lambda step: 0.001 * np.exp(- step / 500) + 0.00001
+    fe_opt = optimizers.adam(learning_rate)
+    actor_opt = optimizers.adam(learning_rate)
+    critic_opt = optimizers.adam(lambda s: 10 * learning_rate(s))
 
-    adam_init, adam_update, get_params = optimizers.adam(learning_rate)
-    adam_state = adam_init(params)
+    opt_init, opt_update, get_params = multi_optimizer(
+        (fe_opt, actor_opt, critic_opt)
+    )
+    opt_state = opt_init(params)
 
     step = 0
     for episode in range(hps.num_episodes):
@@ -146,7 +209,7 @@ def train(env: gym.Env, config: configuration.Config,
 
         _, key = jax.random.split(key)
 
-        params = get_params(adam_state)
+        params = get_params(opt_state)
         model = (apply_fn, params)
         roll = get_rollouts(config, env, model, key=key)
 
@@ -162,10 +225,10 @@ def train(env: gym.Env, config: configuration.Config,
         advantages = []
         returns = []
         for r, v, a in zip(rewards, values, actions):
-            g = utils.make_returns(r, hps.gamma, end_value=v[-1])
+            g = rl.make_returns(r, hps.gamma, end_value=v[-1])
             returns.append(g)
 
-            adv = utils.gae(r, v, gamma=hps.gamma, lam=hps.gae.lam)
+            adv = rl.gae(r, v, gamma=hps.gamma, lam=hps.gae.lam)
             advantages.append(adv)
 
         rewards = np.array(rewards)
@@ -173,13 +236,13 @@ def train(env: gym.Env, config: configuration.Config,
         returns = np.array(returns)
         advantages = np.array(advantages)
 
-        dones = utils.combine_dims(dones)
-        observations = utils.combine_dims(observations)[~dones]
-        actions = utils.combine_dims(actions)[~dones]
-        values = utils.combine_dims(values)[~dones]
-        returns = utils.combine_dims(returns)[~dones]
-        action_logits = utils.combine_dims(action_logits)[~dones]
-        advantages = utils.combine_dims(advantages)[~dones]
+        dones = combine_dims(dones)
+        observations = combine_dims(observations)[~dones]
+        actions = combine_dims(actions)[~dones]
+        values = combine_dims(values)[~dones]
+        returns = combine_dims(returns)[~dones]
+        action_logits = combine_dims(action_logits)[~dones]
+        advantages = combine_dims(advantages)[~dones]
 
         tf.summary.histogram('value_estimates', values, step=step)
 
@@ -197,15 +260,15 @@ def train(env: gym.Env, config: configuration.Config,
         tf.summary.scalar('returns/max', max(g), step=step)
         tf.summary.scalar('learning_rate', learning_rate(step), step=step)
 
-        get_loss = jax.jit(functools.partial(utils.loss, apply_fn))
-        get_loss_components = jax.jit(functools.partial(utils.loss_components, apply_fn))
+        get_loss = jax.jit(functools.partial(loss, apply_fn))
+        get_loss_components = jax.jit(functools.partial(loss_components, apply_fn))
 
         dparams_fn = jax.jit(jax.grad(get_loss))
 
         num_samples = observations.shape[0]
         for _ in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
-            params = get_params(adam_state)
+            params = get_params(opt_state)
 
             al, cl, entropy = get_loss_components(params, observations, actions, advantages, returns, action_logits, rng=key)
             tf.summary.scalar('loss/actor', al, step=step)
@@ -223,7 +286,7 @@ def train(env: gym.Env, config: configuration.Config,
             tf.summary.scalar('gradnorm', optimizers.l2_norm(dparams), step=step)
             dparams = optimizers.clip_grads(dparams, 1)
 
-            adam_state = adam_update(step, dparams, adam_state)
+            opt_state = opt_update(step, dparams, opt_state)
             step += 1
 
 
