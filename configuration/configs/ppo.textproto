@@ -39,5 +39,8 @@ hyperparameters {
   # Generalized Advantage Estimation.
   # 0 -> TD (low variance)
   # 1 -> Monte-Carlo (high variance)
-  gae_lam: 0.1
+  gae { lam: 0.1 }
+
+  # Proximal policy optimization.
+  ppo { clip_epsilon: 0.2 }
 }

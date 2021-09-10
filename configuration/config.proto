@@ -13,11 +13,22 @@ message HyperParameters {
     optional int64 episode_length = 9;
 
     optional float gamma = 4;
-    optional float gae_lam = 10;
+
+    // Generalized Advantage Estimation.
+    message GAE {
+        // 0 -> TD (low variance)
+        // 1 -> Monte-Carlo (high variance)
+        optional float lam = 1;
+    }
+    optional GAE gae = 10;
+
+    message PPO {
+        optional float clip_epsilon = 1;
+    }
+    optional PPO ppo = 11;
 
     optional bool batch = 5;
     optional int64 batch_size = 6;
-
     optional int64 num_sgd_steps = 8;
 
     optional int64 num_environments = 7;

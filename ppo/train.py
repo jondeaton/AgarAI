@@ -1,5 +1,6 @@
+
+import os
 import functools
-import os, sys
 import argparse, logging
 from typing import *
 
@@ -7,9 +8,12 @@ import gym, gym_agario
 import configuration
 from configuration import config_pb2, environment_pb2
 
+from utils import get_training_dir
+
 import rollout
 from ppo import utils
 from ppo import action_conversion
+
 
 import jax
 from jax import numpy as np
@@ -21,9 +25,9 @@ from jax.experimental import optimizers
 from tqdm import tqdm
 
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # If its not an error then fuck off.
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # If its not an error then I dont care.
 import tensorflow as tf
-tf.config.experimental.set_visible_devices([], "GPU")  # no GPU for U, bitch.
+tf.config.experimental.set_visible_devices([], "GPU")  # no GPU for U.
 
 
 def make_actor_critic(model_config: config_pb2.Model,
@@ -87,7 +91,6 @@ def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
         _, key = jax.random.split(key)
         action_logits, values_estimate = apply_fn(params, np.array(observations), rng=key)
         action_indices = jax.random.categorical(key, action_logits)  # Choose actions.
-        log_pas = utils.take_along(jax.nn.log_softmax(action_logits), action_indices)
         values = values_estimate
         actions = list(zip(*jax.vmap(action_converter)(action_indices)))
         next_obs, rewards, next_dones, _ = env.step(actions)
@@ -97,7 +100,7 @@ def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
             "actions": action_indices,
             "rewards": rewards,
             "values": values,
-            "log_pas": log_pas,
+            "action_logits": action_logits,
             "dones": dones
         })
         dones = next_dones
@@ -150,7 +153,7 @@ def train(env: gym.Env, config: configuration.Config,
         # Now these are arrays shaped (num_agents, steps, ...)
         observations = np.array(roll.batched('observations'))
         actions = np.array(roll.batched('actions'))
-        log_pas = np.array(roll.batched('log_pas'))
+        action_logits = np.array(roll.batched('action_logits'))
         dones = np.array(roll.batched('dones'))
 
         # Make the returns / advantage estimate.
@@ -162,7 +165,7 @@ def train(env: gym.Env, config: configuration.Config,
             g = utils.make_returns(r, hps.gamma, end_value=v[-1])
             returns.append(g)
 
-            adv = utils.gae(r, v, gamma=hps.gamma, lam=hps.gae_lam)
+            adv = utils.gae(r, v, gamma=hps.gamma, lam=hps.gae.lam)
             advantages.append(adv)
 
         rewards = np.array(rewards)
@@ -175,7 +178,7 @@ def train(env: gym.Env, config: configuration.Config,
         actions = utils.combine_dims(actions)[~dones]
         values = utils.combine_dims(values)[~dones]
         returns = utils.combine_dims(returns)[~dones]
-        log_pas = utils.combine_dims(log_pas)[~dones]
+        action_logits = utils.combine_dims(action_logits)[~dones]
         advantages = utils.combine_dims(advantages)[~dones]
 
         tf.summary.histogram('value_estimates', values, step=step)
@@ -204,7 +207,7 @@ def train(env: gym.Env, config: configuration.Config,
             _, key = jax.random.split(key)
             params = get_params(adam_state)
 
-            al, cl, entropy = get_loss_components(params, observations, actions, advantages, returns, log_pas, rng=key)
+            al, cl, entropy = get_loss_components(params, observations, actions, advantages, returns, action_logits, rng=key)
             tf.summary.scalar('loss/actor', al, step=step)
             tf.summary.scalar('loss/critic', cl, step=step)
             tf.summary.scalar('loss/entropy', np.mean(entropy), step=step)
@@ -214,7 +217,7 @@ def train(env: gym.Env, config: configuration.Config,
                 key, np.arange(num_samples), shape=(hps.batch_size, ), replace=False)
             dparams = dparams_fn(params,
                                  observations[batch_indices], actions[batch_indices], advantages[batch_indices],
-                                 returns[batch_indices], log_pas[batch_indices],
+                                 returns[batch_indices], action_logits[batch_indices],
                                  rng=key)
 
             tf.summary.scalar('gradnorm', optimizers.l2_norm(dparams), step=step)
@@ -228,7 +231,10 @@ def main():
     args = parse_args()
 
     if args.debug:
-        logging.warning("Debug mode on. Model will not be saved.")
+        logging.debug('Debug mode.')
+
+    if args.debug or args.output is None:
+        logging.warning("Model will not be saved.")
         training_dir = None
         tb_writer = tf.summary.create_noop_writer()
     else:
@@ -238,7 +244,7 @@ def main():
         training_dir = get_training_dir(output_dir, args.name)
         os.makedirs(training_dir, exist_ok=True)
         tb_writer = tf.summary.create_file_writer(training_dir)
-        logging.info(f"Model directory: {training_dir}")
+        logging.info(f"Training directory: {training_dir}")
 
     config = configuration.load(args.config)
 
@@ -261,23 +267,6 @@ def main():
     logging.debug("Exiting.")
 
 
-def get_training_dir(output_dir: Optional[str], name: str) -> Optional[str]:
-    """
-    finds a suitable subdirectory within `output_dir` to
-    save files from this run named `name`.
-    :param output_dir: global output directory
-    :param name: name of this run
-    :return: path to file of the form /path/to/output/name-X
-    """
-    if output_dir is None:
-        return None
-    base = os.path.join(output_dir, name)
-    i = 0
-    while os.path.exists(f"{base}-{i:03d}"):
-        i += 1
-    return f"{base}-{i:03d}"
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Train an agent.")
 
@@ -290,7 +279,7 @@ def parse_args():
 
     logging_group = parser.add_argument_group("Logging")
     logging_group.add_argument('--log', dest="log_level", choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-                               default="DEBUG", help="Logging level")
+                               default="INFO", help="Logging level")
     args = parser.parse_args()
     return args
 

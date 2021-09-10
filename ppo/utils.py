@@ -12,18 +12,44 @@ def take_along(x: np.ndarray, i: np.ndarray) -> np.ndarray:
     return x.take(i + np.arange(x.shape[0]) * x.shape[1])
 
 
+@jax.jit
 def ppo_actor_loss(
-    action_logits, values, actions, advantages, log_pa,
-        clip_eps: float = 0.01):
-    """PPO Actor Loss."""
-    one_hot_acitons = jax.nn.one_hot(actions, action_logits.shape[1])
-    new_log_pas = jax.nn.log_softmax(action_logits) * one_hot_acitons
-    new_log_pa = take_along(new_log_pas, actions)
-    ratio = np.exp(new_log_pa - log_pa)
-    loss = np.minimum(
+        action_logits: np.ndarray,
+        actions: np.ndarray,
+        advantages: np.ndarray,
+        old_action_logits: np.ndarray,
+        clip_eps: float) -> float:
+    """Proximal Policy Optimization Actor Loss.
+
+    As per https://arxiv.org/abs/1707.06347.
+
+    Args:
+        action_logits: (batch_size, num_actions)
+        actions: (batch_size, )
+        advantages: (batch_size, )
+        old_action_logits: (batch_size, num_actions)
+    Returns:
+        Scalar loss for the batch.
+    """
+    advantages = jax.lax.stop_gradient(advantages)
+
+    new_log_pa = np.take_along_axis(
+        jax.nn.log_softmax(action_logits, axis=1), actions[:, np.newaxis], axis=1)[:, 0]
+    old_log_pa = np.take_along_axis(
+        jax.nn.log_softmax(old_action_logits, axis=1), actions[:, np.newaxis], axis=1)[:, 0]
+
+    ratio = np.exp(new_log_pa - old_log_pa)
+
+    a_clip = np.minimum(
         advantages * ratio,
-        advantages * np.clip(ratio, 1 - clip_eps, 1 + clip_eps)).mean()
-    return loss
+        advantages * np.clip(ratio, 1 - clip_eps, 1 + clip_eps))
+
+    _, num_actions = action_logits.shape
+    action_one_hot = jax.nn.one_hot(actions, num_actions)
+    p = a_clip[:, np.newaxis] * action_one_hot
+
+    l = fl(p, action_logits)
+    return l.mean(axis=0)
 
 
 @jax.jit
@@ -37,26 +63,27 @@ def huber(a, delta: float = 1.0):
     )
 
 
-
 @jax.jit
 def combine_dims(x):
     return x.reshape((-1, ) + x.shape[2:])
 
 
 def loss(apply_fn,
-         params, observations, actions, advantages, returns, log_pa,
+         params, observations, actions, advantages, returns, action_logits,
          rng: Optional[jax.random.PRNGKey] = None):
     loss_actor, loss_critic, entropy = loss_components(
         apply_fn,
-        params, observations, actions, advantages, returns, log_pa, rng=rng)
+        params, observations, actions, advantages, returns, action_logits, rng=rng)
     return loss_actor + loss_critic - (entropy.mean() / 100)
 
 
-def loss_components(apply_fn,
-         params, observations, actions, advantages, returns, log_pa,
-         rng: Optional[jax.random.PRNGKey] = None):
+def loss_components(
+        apply_fn,
+        params, observations, actions, advantages, returns, old_action_logits,
+        rng: Optional[jax.random.PRNGKey] = None):
     action_logits, values = apply_fn(params, observations, rng=rng)
-    loss_actor = actor_loss(action_logits, values, actions, advantages, log_pa)
+    loss_actor = ppo_actor_loss(action_logits, actions, advantages, old_action_logits,
+                                clip_eps=0.2)
     loss_critic = critic_loss(values, returns)
 
     entropy = xs(jax.nn.softmax(action_logits, axis=1), action_logits)
@@ -66,18 +93,14 @@ def loss_components(apply_fn,
 
 def actor_loss(
         action_logits: np.ndarray,
-        values: np.ndarray,
         actions: np.ndarray,
-        advantages: np.ndarray,
-        log_pa: np.ndarray) -> np.ndarray:
+        advantages: np.ndarray) -> np.ndarray:
     """Standard Actor loss.
 
     Args:
         action_logits: (batch_size, num_actions)
-        values: (batch_size, )
         actions: (batch_size, )
         advantages: (batch_size, )
-        log_pa: (batch_size, num_actions)
     Returns:
         Scalar loss for the batch.
     """
@@ -86,7 +109,7 @@ def actor_loss(
     adv = jax.lax.stop_gradient(advantages)
     p = adv[:, np.newaxis] * action_one_hot
     l = fl(p, action_logits)
-    return np.mean(l, axis=0)  # average over batch.
+    return l.mean(axis=0)  # average over batch.
 
 
 @jax.jit
@@ -135,21 +158,21 @@ def n_step_return(rewards: onp.ndarray,
     return returns
 
 
-def gae(returns: onp.ndarray,
+def gae(rewards: onp.ndarray,
         values: onp.ndarray,
         gamma: float, lam: float) -> onp.ndarray:
     """Generalized Advantage Estimation.
 
-    Zero makes the advantage equal to Temporal Difference residuals
+    Lambda zero makes the advantage equal to Temporal Difference residuals
     (low variance)
 
-        r[t] + gamma * V[t] - V[t - 1])
+        r[t] + gamma * V[t] - V[t - 1]
 
     and lam: 1.0 makes it equivalent to Monte-Carlo advantage estimation
-    for the full rollout
+    for the full rollout.
 
     Args:
-        returns: Shape (T, )
+        rewards: Shape (T, )
         values: Shape (T + 1, ) state value estimates. This has
           shape one larger than returns so that the last step
           that is part of the estimate can have a next-step-value
@@ -163,23 +186,23 @@ def gae(returns: onp.ndarray,
     Returns:
         Advantage estimates of the same shape as returns: (T, ).
     """
-    delta = returns + gamma * values[1:] - values[:-1]  # TD residual.
-    adv = onp.zeros_like(returns)
+    delta = rewards + gamma * values[1:] - values[:-1]  # TD residual.
+    adv = onp.zeros_like(rewards)
 
     adv[-1] = delta[-1]
-    for t in reversed(range(len(returns) - 1)):
+    for t in reversed(range(len(rewards) - 1)):
         adv[t] = delta[t] + (gamma * lam) * adv[t + 1]
     return adv
 
 
 from jax import ops
 @jax.jit
-def _gae(returns, values, gamma, lam):
+def _gae(rewards, values, gamma, lam):
 
-    T, = returns.shape
-    delta = returns + gamma * values[1:] - values[:-1]
+    T, = rewards.shape
+    delta = rewards + gamma * values[1:] - values[:-1]
 
-    adv = onp.zeros_like(returns)
+    adv = onp.zeros_like(rewards)
     adv = ops.index_update(adv, T, delta[T])
 
     # todo: this doesn't actually work but is the right idea.
