@@ -65,9 +65,8 @@ hyperparameters {
   # 0 -> TD (low variance)
   # 1 -> Monte-Carlo (high variance)
   gae { lam: 0.1 }
-
   loss {
     # Proximal policy optimization.
-    ppo { clip_epsilon: 0.2 }
+    ppo { clip_epsilon: REPLACE }
   }
 }

@@ -1,3 +1,4 @@
+"""Trains policy gradient agent."""
 
 import os
 import functools
@@ -80,34 +81,52 @@ def combine_dims(x):
     return x.reshape((-1, ) + x.shape[2:])
 
 
-def loss(apply_fn,
-         params, observations, actions, advantages, returns, action_logits,
-         rng: Optional[jax.random.PRNGKey] = None):
-    loss_actor, loss_critic, entropy = loss_components(
-        apply_fn,
-        params, observations, actions, advantages, returns, action_logits,
-        rng=rng)
-    return loss_actor + loss_critic + 1 / (entropy.mean() * 100)
+def get_loss(apply_fn: Callable, config: config_pb2.Loss) -> Callable:
+
+    loss_components = get_loss_components(apply_fn, config)
+
+    @jax.jit
+    def loss(params, observations, actions, advantages, returns, action_logits,
+             rng: Optional[jax.random.PRNGKey] = None):
+        """Loss function."""
+        components = loss_components(params,
+                                     observations,
+                                     actions,
+                                     advantages,
+                                     returns, action_logits,
+                                     rng=rng)
+        entropy = components['entropy']
+        loss_actor = components['actor']
+        loss_critic = components['critic']
+        return loss_actor + loss_critic + 1 / (entropy * 100)
+
+    return loss
 
 
-def loss_components(
-        apply_fn,
-        params, observations, actions, advantages, returns, old_action_logits,
-        rng: Optional[jax.random.PRNGKey] = None,
-        ppo: bool = False):
-    action_logits, values = apply_fn(params, observations, rng=rng)
-    if ppo:
-        loss_actor = rl.ppo_actor_loss(
-            action_logits, actions, advantages, old_action_logits,
-            clip_eps=0.2)
-    else:
-        loss_actor = rl.actor_loss(action_logits, actions, advantages)
+def get_loss_components(apply_fn: Callable, config: config_pb2.Loss) -> Callable:
 
-    loss_critic = rl.critic_loss(values, returns)
+    @jax.jit
+    def loss_components(
+            params, observations, actions, advantages, returns, old_action_logits,
+            rng: Optional[jax.random.PRNGKey] = None) -> Mapping[str, np.ndarray]:
 
-    entropy = rl.xs(jax.nn.softmax(action_logits, axis=1), action_logits)
+        action_logits, values = apply_fn(params, observations, rng=rng)
 
-    return loss_actor, loss_critic, entropy
+        if config.HasField('ppo'):
+            actor_loss = rl.ppo_actor_loss(
+                action_logits, actions, advantages, old_action_logits,
+                clip_eps=config.ppo.clip_epsilon)
+        else:
+            # Normal policy gradient loss.
+            actor_loss = rl.actor_loss(action_logits, actions, advantages)
+
+        return {
+            'actor': actor_loss,
+            'critic': rl.critic_loss(values, returns),
+            'entropy': rl.xs(jax.nn.softmax(action_logits, axis=1), action_logits).mean(),
+        }
+
+    return loss_components
 
 
 def multi_optimizer(optimizers):
@@ -178,6 +197,30 @@ def get_rollouts(config, env, model, key) -> rollout.MultiRollout:
     return roll
 
 
+def make_schedule(schedule: config_pb2.Schedule) -> Callable[int, float]:
+    """Creates a schedule."""
+
+    if schedule.HasField('inverse_time_decay'):
+        base_schedule = optimizers.inverse_time_decay(
+            step_size=schedule.inverse_time_decay.base,
+            decay_steps=schedule.inverse_time_decay.decay_steps,
+            decay_rate=schedule.inverse_time_decay.decay_rate)
+
+    elif schedule.HasField('exponential_decay'):
+        base_schedule = optimizers.exponential_decay(
+            step_size=schedule.exponential_decay.base,
+            decay_steps=-schedule.exponential_decay.decay_steps,
+            decay_rate=schedule.exponential_decay.decay_rate)
+
+    elif schedule.HasField('constant'):
+        base_schedule = lambda _: schedule.constant
+
+    else:
+        raise ValueError(f'No schedule: {schedule}')
+
+    return jax.jit(lambda t: schedule.scale * base_schedule(t) + schedule.shift)
+
+
 def train(env: gym.Env, config: configuration.Config,
           test_env: Optional[gym.Env] = None,
           training_dir: Optional[str] = None):
@@ -193,14 +236,16 @@ def train(env: gym.Env, config: configuration.Config,
     key = jax.random.PRNGKey(hps.seed)
     _, params = init_fn(key, input_shape)
 
-    learning_rate = lambda step: 0.001 * np.exp(- step / 500) + 0.00001
-    fe_opt = optimizers.adam(learning_rate)
-    actor_opt = optimizers.adam(learning_rate)
-    critic_opt = optimizers.adam(lambda s: 10 * learning_rate(s))
+    lrs = [
+        make_schedule(hps.feature_extractor_lr),
+        make_schedule(hps.actor_lr),
+        make_schedule(hps.critic_lr),
+    ]
+    fe_opt = optimizers.adam(make_schedule(hps.feature_extractor_lr))
+    actor_opt = optimizers.adam(make_schedule(hps.actor_lr))
+    critic_opt = optimizers.adam(make_schedule(hps.critic_lr))
 
-    opt_init, opt_update, get_params = multi_optimizer(
-        (fe_opt, actor_opt, critic_opt)
-    )
+    opt_init, opt_update, get_params = multi_optimizer((fe_opt, actor_opt, critic_opt))
     opt_state = opt_init(params)
 
     step = 0
@@ -258,23 +303,23 @@ def train(env: gym.Env, config: configuration.Config,
         tf.summary.scalar('returns/min_max_size', np.min(max_sizes), step=step)
         tf.summary.scalar('returns/average', onp.mean(g), step=step)
         tf.summary.scalar('returns/max', max(g), step=step)
-        tf.summary.scalar('learning_rate', learning_rate(step), step=step)
+        for lr, name in zip(lrs, ['fe', 'actor', 'critic']):
+            tf.summary.scalar(f'learning_rate/{name}', lr(step), step=step)
 
-        get_loss = jax.jit(functools.partial(loss, apply_fn))
-        get_loss_components = jax.jit(functools.partial(loss_components, apply_fn))
+        loss_fn = get_loss(apply_fn, hps.loss)
+        loss_components_fn = get_loss_components(apply_fn, hps.loss)
 
-        dparams_fn = jax.jit(jax.grad(get_loss))
+        dparams_fn = jax.jit(jax.grad(loss_fn))
 
         num_samples = observations.shape[0]
         for _ in tqdm(range(hps.num_sgd_steps)):
             _, key = jax.random.split(key)
             params = get_params(opt_state)
 
-            al, cl, entropy = get_loss_components(params, observations, actions, advantages, returns, action_logits, rng=key)
-            tf.summary.scalar('loss/actor', al, step=step)
-            tf.summary.scalar('loss/critic', cl, step=step)
-            tf.summary.scalar('loss/entropy', np.mean(entropy), step=step)
-            tf.summary.histogram('entropy', entropy, step=step)
+            loss_components = loss_components_fn(
+                params, observations, actions, advantages, returns, action_logits, rng=key)
+            for name, l in loss_components.items():
+                tf.summary.scalar(f'loss/{name}', l, step=step)
 
             batch_indices = jax.random.choice(
                 key, np.arange(num_samples), shape=(hps.batch_size, ), replace=False)
@@ -304,7 +349,8 @@ def main():
         output_dir = args.output
         os.makedirs(args.output, exist_ok=True)
 
-        training_dir = get_training_dir(output_dir, args.name)
+        name = f'{args.config}-{args.name}' if args.name else args.config
+        training_dir = get_training_dir(output_dir, name)
         os.makedirs(training_dir, exist_ok=True)
         tb_writer = tf.summary.create_file_writer(training_dir)
         logging.info(f"Training directory: {training_dir}")
@@ -337,7 +383,7 @@ def parse_args():
 
     output_options = parser.add_argument_group("Output")
     output_options.add_argument("--output", default="model_outputs", help="Output directory")
-    output_options.add_argument("--name", default="ppo", help="Experiment or run name")
+    output_options.add_argument("--name", help="Experiment or run name")
     output_options.add_argument("--debug", action="store_true", help="Debug mode.")
 
     logging_group = parser.add_argument_group("Logging")

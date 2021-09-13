@@ -1,0 +1,43 @@
+# proto-file: configuration/config.proto
+# proto-message: Config
+
+environment {
+  num_agents: 16
+  agario {
+    difficulty: EMPTY
+    num_pellets: 1000
+    arena_size: 1000
+    num_viruses: 0
+    num_bots: 0
+  }
+  observation {
+    type: GRID
+    ticks_per_step: 4
+    grid_size: 64
+    viruses: false
+  }
+  action {
+    num_directions: 8
+    num_magnitudes: 1
+  }
+}
+model {
+  feature_extractor {
+    num_features: 1024
+  }
+}
+hyperparameters {
+  num_episodes: 1000
+  episode_length: 512
+
+  num_sgd_steps: 8
+  batch_size: 128
+  learning_rate: 0.001
+
+  gamma:REPLACE
+
+  # Generalized Advantage Estimation.
+  # 0 -> TD (low variance)
+  # 1 -> Monte-Carlo (high variance)
+  gae{lam:REPLACE}
+}

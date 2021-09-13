@@ -5,10 +5,47 @@ syntax = "proto2";
 package configuration;
 import "environment.proto";
 
+message Schedule {
+
+    optional float shift = 1 [default = 0];
+    optional float scale = 2 [default = 1];
+
+    message InverseTimeDecay {
+        // base * (1 + decay_rate * t / decay_step)
+        optional float base = 1;
+        optional float decay_rate = 2;
+        optional float decay_steps = 3;
+    }
+
+    message ExponentialDecay {
+        // base * decay_rate ^ (- t / decay_steps)
+        optional float base = 1;
+        optional float decay_rate = 2;
+        optional float decay_steps = 3;
+    }
+
+    oneof schedule {
+        float constant = 4;
+        InverseTimeDecay inverse_time_decay = 3;
+        ExponentialDecay exponential_decay = 5;
+    };
+}
+
+message Loss {
+    message PPO {
+        optional float clip_epsilon = 1;
+    }
+    optional PPO ppo = 1;
+}
+
 message HyperParameters {
     optional int64 seed = 1 [default = 0];
 
-    optional float learning_rate = 2;
+    optional Schedule feature_extractor_lr = 20;
+    optional Schedule actor_lr = 21;
+    optional Schedule critic_lr = 22;
+
+
     optional int64 num_episodes = 3;
     optional int64 episode_length = 9;
 
@@ -22,10 +59,7 @@ message HyperParameters {
     }
     optional GAE gae = 10;
 
-    message PPO {
-        optional float clip_epsilon = 1;
-    }
-    optional PPO ppo = 11;
+    optional Loss loss = 30;
 
     optional bool batch = 5;
     optional int64 batch_size = 6;

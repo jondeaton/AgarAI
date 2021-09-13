@@ -4,6 +4,8 @@ import jax
 from jax import numpy as np
 import numpy as onp
 
+from jax import ops
+
 from typing import *
 
 
@@ -29,21 +31,18 @@ def ppo_actor_loss(
     advantages = jax.lax.stop_gradient(advantages)
 
     new_log_pa = np.take_along_axis(
-        jax.nn.log_softmax(action_logits, axis=1), actions[:, np.newaxis], axis=1)[:, 0]
+        jax.nn.log_softmax(action_logits, axis=1),
+        actions[:, np.newaxis], axis=1)[:, 0]
     old_log_pa = np.take_along_axis(
-        jax.nn.log_softmax(old_action_logits, axis=1), actions[:, np.newaxis], axis=1)[:, 0]
+        jax.nn.log_softmax(old_action_logits, axis=1),
+        actions[:, np.newaxis], axis=1)[:, 0]
 
     ratio = np.exp(new_log_pa - old_log_pa)
 
-    a_clip = np.minimum(
+    l = - np.minimum(
         advantages * ratio,
         advantages * np.clip(ratio, 1 - clip_eps, 1 + clip_eps))
 
-    _, num_actions = action_logits.shape
-    action_one_hot = jax.nn.one_hot(actions, num_actions)
-    p = a_clip[:, np.newaxis] * action_one_hot
-
-    l = fl(p, action_logits)
     return l.mean(axis=0)
 
 
@@ -56,30 +55,6 @@ def huber(a, delta: float = 1.0):
     return np.where(
         np.abs(a) < delta, np.square(a) / 2, delta * (np.abs(a) - delta / 2)
     )
-
-
-def loss(apply_fn,
-         params, observations, actions, advantages, returns, action_logits,
-         rng: Optional[jax.random.PRNGKey] = None):
-    loss_actor, loss_critic, entropy = loss_components(
-        apply_fn,
-        params, observations, actions, advantages, returns, action_logits, rng=rng)
-    return loss_actor + loss_critic - (entropy.mean() / 100)
-
-
-def loss_components(
-        apply_fn,
-        params, observations, actions, advantages, returns, old_action_logits,
-        rng: Optional[jax.random.PRNGKey] = None):
-    action_logits, values = apply_fn(params, observations, rng=rng)
-    loss_actor = ppo_actor_loss(action_logits, actions, advantages, old_action_logits,
-                                clip_eps=0.2)
-    loss_critic = critic_loss(values, returns)
-
-    entropy = xs(jax.nn.softmax(action_logits, axis=1), action_logits)
-
-    return loss_actor, loss_critic, entropy
-
 
 def actor_loss(
         action_logits: np.ndarray,
@@ -104,53 +79,23 @@ def actor_loss(
 
 @jax.jit
 def xs(p: np.ndarray, q_logits: np.ndarray) -> np.ndarray:
+    """Cross Entropy."""
     log_q = jax.nn.log_softmax(q_logits, axis=1)
     return np.where(p == 0, 0, - p * log_q).sum(axis=1)
 
 
 def fl(p, q_logits, gamma: float = 1.0):
+    """Focal Loss."""
     q = jax.nn.softmax(q_logits, axis=1)
     mf = np.power(1 - q, gamma)
     return xs(mf * p, q_logits)
 
 
 @jax.jit
-def get_efficiency(rewards: np.ndarray,
-                   episode_length: int,
-                   num_pellets: int, arena_size: int):
-    """Agario mass efficiency.
-
-    Calculates the "agario mass efficiency", which is a quantity that i invented lol
-    It is supposed to capture the rate at which mass was accumulated relative to
-    the density of pellets in the arena. In this way, performance can be
-    compared across episodes of different lengths, arenas of different sizes
-    and with different numbers of pellets.
-    """
-    G = rewards.sum()
-    pellet_density = num_pellets / pow(arena_size, 2)
-    efficiency = G / (episode_length * pellet_density)
-    return efficiency
-
-
-def n_step_return(rewards: onp.ndarray,
-                  value_estiamtes: onp.ndarray,
-                  gamma: float,
-                  n: int) -> onp.ndarray:
-    returns = onp.zeros_like(rewards)
-    for t in range(len(rewards)):
-
-        Rt = value_estiamtes[t + n]
-        for l in reversed(range(n - 1)):
-            Rt = gamma * Rt + rewards[t + l]
-
-        returns[t] = Rt
-
-    return returns
-
-
-def gae(rewards: onp.ndarray,
-        values: onp.ndarray,
-        gamma: float, lam: float) -> onp.ndarray:
+def gae(rewards: np.ndarray,
+         values: np.ndarray,
+         gamma: float,
+         lam: float) -> np.ndarray:
     """Generalized Advantage Estimation.
 
     Lambda zero makes the advantage equal to Temporal Difference residuals
@@ -176,56 +121,57 @@ def gae(rewards: onp.ndarray,
     Returns:
         Advantage estimates of the same shape as returns: (T, ).
     """
-    delta = rewards + gamma * values[1:] - values[:-1]  # TD residual.
-    adv = onp.zeros_like(rewards)
-
-    adv[-1] = delta[-1]
-    for t in reversed(range(len(rewards) - 1)):
-        adv[t] = delta[t] + (gamma * lam) * adv[t + 1]
-    return adv
-
-
-from jax import ops
-@jax.jit
-def _gae(rewards, values, gamma, lam):
-
     T, = rewards.shape
-    delta = rewards + gamma * values[1:] - values[:-1]
+    v_next = values[1:]
+    v_current = values[:-1]
+    delta = rewards + gamma * v_next - v_current
 
-    adv = onp.zeros_like(rewards)
-    adv = ops.index_update(adv, T, delta[T])
+    # Convert to real time.
+    t = lambda i: T - 1 - i
 
-    # todo: this doesn't actually work but is the right idea.
-    # just go backwards instead...
     return jax.lax.fori_loop(
-        0, T - 1,
-        lambda t, adv: jax.ops.index_update(
-            adv, t, delta[t] + (gamma * lam) * adv[t + 1]
+        0, T,
+        lambda i, adv: jax.ops.index_update(
+            adv, t(i), delta[t(i)] + (gamma * lam) * adv[t(i) + 1]
         ),
-        adv
-    )
+        np.zeros(T))
 
 
-def make_returns(rewards: onp.ndarray, gamma: float, end_value: float = 0.0) -> onp.ndarray:
+@jax.jit
+def make_returns(rewards: np.ndarray, gamma: float, end_value: float = 0.0) -> np.ndarray:
     """ Calculates the discounted future returns for a single rollout
     :param rewards: numpy array containing rewards
     :param gamma: discount factor 0 < gamma < 1
     :return: numpy array containing discounted future returns
     """
-    returns = onp.zeros_like(rewards)
-    ret = end_value
-    for i in reversed(range(len(rewards))):
-        ret = rewards[i] + gamma * ret
-        returns[i] = ret
+    T, = rewards.shape
+    t = lambda i: T - 1 - i
+    return jax.lax.fori_loop(
+        0, T,
+        lambda i, ret: jax.ops.index_update(
+            ret, t(i),
+            rewards[t(i)] + gamma * jax.lax.cond(
+                i == 0,
+                lambda _: end_value,
+                lambda _: ret[t(i) + 1],
+                None)
+        ),
+        np.zeros(T))
 
-    return returns
 
+@jax.jit
+def agario_efficiency(rewards: np.ndarray,
+                      episode_length: int,
+                      num_pellets: int, arena_size: int):
+    """Agario mass efficiency.
 
-def make_returns_batch(reward_batch: List[onp.ndarray], gamma: float) -> List[onp.ndarray]:
-    """ Calculates discounted episodes returns
-    :param reward_batch: list of numpy arrays. Each numpy array is
-    the episode rewards for a single episode in the batch
-    :param gamma: discount factor 0 < gamma < 1
-    :return: list of numpy arrays representing the returns
+    Calculates the "agario mass efficiency", which is a quantity that i invented lol
+    It is supposed to capture the rate at which mass was accumulated relative to
+    the density of pellets in the arena. In this way, performance can be
+    compared across episodes of different lengths, arenas of different sizes
+    and with different numbers of pellets.
     """
-    return [make_returns(rewards, gamma) for rewards in reward_batch]
+    G = rewards.sum()
+    pellet_density = num_pellets / pow(arena_size, 2)
+    efficiency = G / (episode_length * pellet_density)
+    return efficiency

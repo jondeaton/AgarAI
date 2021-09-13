@@ -14,7 +14,9 @@ def get_training_dir(output_dir: str, name: str) -> str:
     :return: Path to file of the form /path/to/output/name-X
     """
     base = os.path.join(output_dir, name)
-    i = 0
+    if not os.path.exists(base):
+        return base
+    i = 1
     while os.path.exists(f"{base}-{i:03d}"):
         i += 1
     return f"{base}-{i:03d}"
